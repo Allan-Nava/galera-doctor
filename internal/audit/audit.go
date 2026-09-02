@@ -41,7 +41,12 @@ type Options struct {
 	// ISTWarn is the shortest gcache window worth having: below it, a node that
 	// restarts is likely to need a full SST instead of an incremental transfer.
 	ISTWarn time.Duration
-	Now     time.Time
+	// ClockWarn and ClockBad are the spread between the nodes' own clocks. The
+	// nodes are compared with each other, not with the auditing host, so a
+	// threshold here is about the cluster rather than about this machine's NTP.
+	ClockWarn time.Duration
+	ClockBad  time.Duration
+	Now       time.Time
 }
 
 // DefaultOptions are the thresholds used when a caller passes none.
@@ -51,6 +56,8 @@ func DefaultOptions() Options {
 		FlowBad:       0.10,
 		RecvQueueWarn: 10,
 		ISTWarn:       30 * time.Minute,
+		ClockWarn:     2 * time.Second,
+		ClockBad:      30 * time.Second,
 		Now:           time.Now(),
 	}
 }
@@ -130,6 +137,10 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(autoIncrement(rep.Cluster, live)...)
 	add(gcacheRecover(live)...)
 	add(osuMethod(live)...)
+	add(clockSkew(rep.Cluster, live, opt)...)
+	add(writeSetLimits(rep.Cluster, live)...)
+	add(durability(rep.Cluster, live)...)
+	add(segments(rep.Cluster, live)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
 	add(versions(rep.Cluster, live)...)
@@ -1109,6 +1120,227 @@ func osuMethod(live []cluster.Snapshot) []finding.Finding {
 		})
 	}
 	return out
+}
+
+// clockSkew reports nodes whose clocks disagree (GD-16).
+//
+// Certification does not care: Galera orders writes by sequence number, not by
+// time. Everything a human does during an incident cares a great deal —
+// reading two error logs side by side, correlating a flow-control spike with a
+// backup, believing a timestamp in a monitoring system. The nodes are compared
+// with each other rather than with the auditing host, because this host's clock
+// is not a reference either.
+func clockSkew(name string, live []cluster.Snapshot, opt Options) []finding.Finding {
+	var read []cluster.Snapshot
+	for _, s := range live {
+		if !s.Clock.IsZero() {
+			read = append(read, s)
+		}
+	}
+	if len(read) < 2 {
+		return nil
+	}
+
+	// Each node's clock, corrected for when its snapshot was taken: the
+	// snapshots are concurrent but not simultaneous.
+	offset := make(map[string]time.Duration, len(read))
+	var lo, hi time.Duration
+	first := true
+	for _, s := range read {
+		at := s.At
+		if at.IsZero() {
+			at = opt.Now
+		}
+		d := s.Clock.Sub(at)
+		offset[s.Node] = d
+		if first || d < lo {
+			lo = d
+		}
+		if first || d > hi {
+			hi = d
+		}
+		first = false
+	}
+	spread := hi - lo
+
+	// Name the nodes at the edges of the spread rather than every node's
+	// offset: a report is read at 03:00.
+	var slowest, fastest string
+	for _, s := range read {
+		if offset[s.Node] == lo && slowest == "" {
+			slowest = s.Node
+		}
+		if offset[s.Node] == hi && fastest == "" {
+			fastest = s.Node
+		}
+	}
+
+	status := finding.OK
+	switch {
+	case spread >= opt.ClockBad:
+		status = finding.BAD
+	case spread >= opt.ClockWarn:
+		status = finding.WARN
+	}
+	f := finding.Finding{
+		Check: "node/clock", Target: name, Status: status,
+		Value: finding.Num(spread.Seconds()), Unit: "seconds",
+	}
+	if status == finding.OK {
+		f.Message = fmt.Sprintf("node clocks agree to within %s across %d node(s)", spread.Round(time.Millisecond), len(read))
+		return []finding.Finding{f}
+	}
+	f.Message = fmt.Sprintf("node clocks differ by %s: %s is ahead of %s",
+		spread.Round(time.Millisecond), fastest, slowest)
+	f.Hint = "Galera orders writes by sequence number, so replication is unaffected — but two error logs cannot be read side by side, and a timestamp in a monitoring system stops meaning anything. Check NTP on " + fastest + " and " + slowest
+	return []finding.Finding{f}
+}
+
+// writeSetLimits reports appliers that will refuse what was certified (GD-30).
+//
+// A transaction is certified on the node that accepted it. It is then applied
+// everywhere — and an applier whose wsrep_max_ws_size is smaller than the
+// write-set refuses it and leaves the cluster, which arrives as a node failure
+// rather than as the configuration difference it is.
+func writeSetLimits(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, key := range []string{"wsrep_max_ws_size", "wsrep_max_ws_rows"} {
+		var reporting []cluster.Snapshot
+		for _, s := range live {
+			if v, ok := s.Var(key); ok && strings.TrimSpace(v) != "" {
+				reporting = append(reporting, s)
+			}
+		}
+		if len(reporting) < 2 {
+			continue
+		}
+		groups := groupBy(reporting, func(s cluster.Snapshot) string {
+			v, _ := s.Var(key)
+			return strings.TrimSpace(v)
+		})
+		if len(groups) == 1 {
+			continue
+		}
+		// The smallest non-zero limit is the cluster's real limit: 0 is
+		// "unlimited" for both of these.
+		var weakest string
+		var smallest float64
+		for _, s := range reporting {
+			v, ok := s.Float(key)
+			if !ok || v == 0 {
+				continue
+			}
+			if weakest == "" || v < smallest {
+				weakest, smallest = s.Node, v
+			}
+		}
+		msg := fmt.Sprintf("nodes disagree about %s: %s", key, describeGroups(groups))
+		if weakest != "" {
+			msg += fmt.Sprintf(" — the cluster's real limit is %s's %s", weakest, trimFloat(smallest))
+		}
+		out = append(out, finding.Finding{
+			Check: "repl/ws-limits", Target: name, Status: finding.WARN,
+			Message: msg,
+			Hint:    "the write-set is certified on the node that accepted it and refused by the applier with the smaller limit, which then leaves the cluster — it arrives as a node failure and it is a configuration difference",
+		})
+	}
+	return out
+}
+
+// durability reports nodes whose durability is not the others' (GD-35).
+//
+// A cluster's durability is its weakest node's, not its average: "committed on
+// three nodes" means something different when one of them acknowledges before
+// its log reaches the disk. Each node is doing exactly what it was told, so
+// nothing reports it — and a uniform relaxed setting is the cluster's decision
+// rather than a finding.
+func durability(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, v := range []struct{ key, safe string }{
+		{"innodb_flush_log_at_trx_commit", "1"},
+		{"sync_binlog", "1"},
+	} {
+		var reporting []cluster.Snapshot
+		for _, s := range live {
+			if val, ok := s.Var(v.key); ok && strings.TrimSpace(val) != "" {
+				reporting = append(reporting, s)
+			}
+		}
+		if len(reporting) < 2 {
+			continue
+		}
+		groups := groupBy(reporting, func(s cluster.Snapshot) string {
+			val, _ := s.Var(v.key)
+			return strings.TrimSpace(val)
+		})
+		if len(groups) == 1 {
+			continue
+		}
+		var weak []string
+		for _, s := range reporting {
+			if val, ok := s.Var(v.key); ok && strings.TrimSpace(val) != v.safe {
+				weak = append(weak, s.Node)
+			}
+		}
+		sort.Strings(weak)
+		out = append(out, finding.Finding{
+			Check: "node/durability", Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("nodes disagree about %s: %s", v.key, describeGroups(groups)),
+			Hint: "a cluster's durability is its weakest node's, not its average: on " + strings.Join(weak, ", ") +
+				" a commit is acknowledged before it reaches the disk, so \"committed on every node\" survives a process crash and not a power cut",
+		})
+	}
+	return out
+}
+
+// segments reports the segment map (GD-31).
+//
+// Segments are what stops a write-set crossing a WAN link once per node
+// instead of once per segment. The intent behind a particular map lives in
+// somebody's head and not in the server, so this reports the map it found and
+// grades only the case that cannot be deliberate: every node in a segment of
+// its own, which turns the optimisation off entirely.
+func segments(name string, live []cluster.Snapshot) []finding.Finding {
+	var reporting []cluster.Snapshot
+	for _, s := range live {
+		if v, ok := s.ProviderOption("gmcast.segment"); ok && strings.TrimSpace(v) != "" {
+			reporting = append(reporting, s)
+		}
+	}
+	if len(reporting) < 2 {
+		return nil
+	}
+	groups := groupBy(reporting, func(s cluster.Snapshot) string {
+		v, _ := s.ProviderOption("gmcast.segment")
+		return strings.TrimSpace(v)
+	})
+
+	parts := make([]string, 0, len(groups))
+	keys := make([]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		nodes := append([]string(nil), groups[k]...)
+		sort.Strings(nodes)
+		parts = append(parts, fmt.Sprintf("segment %s: %s", k, strings.Join(nodes, ", ")))
+	}
+	msg := strings.Join(parts, "; ")
+
+	if len(groups) == len(reporting) && len(reporting) > 2 {
+		return []finding.Finding{{
+			Check: "cluster/segments", Target: name, Status: finding.WARN,
+			Message: "every node is in a segment of its own — " + msg,
+			Value:   finding.Num(float64(len(groups))), Unit: "segments",
+			Hint: "a write-set crosses a link once per segment, not once per node: with one node per segment there is nothing left to share, so every node pays the WAN transfer separately",
+		}}
+	}
+	return []finding.Finding{{
+		Check: "cluster/segments", Target: name, Status: finding.OK,
+		Message: fmt.Sprintf("%d segment(s) over %d node(s) — %s", len(groups), len(reporting), msg),
+		Value:   finding.Num(float64(len(groups))), Unit: "segments",
+	}}
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.

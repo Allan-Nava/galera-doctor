@@ -6,6 +6,39 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.5.0] - 2026-09-02
+
+### Added
+
+- **`node/clock`** (GD-16) — the spread between the nodes' own clocks, read as
+  `UNIX_TIMESTAMP(NOW(6))` in the same round trip as everything else, and
+  stamped with this host's time immediately before that round trip so the
+  server's response time is not folded into the number. The nodes are compared
+  with each other rather than with the auditing host, because this host's NTP
+  is not a reference either. Replication is unaffected — Galera orders writes
+  by sequence number — and everything a human does during an incident is:
+  `--clock-warn` (2s) and `--clock-bad` (30s). A clock that could not be read
+  is not a clock that agrees.
+
+- **`repl/ws-limits`** (GD-30) — `wsrep_max_ws_size` and `wsrep_max_ws_rows`
+  differing between nodes. The write-set is certified on the node that accepted
+  it and refused by the applier with the smaller limit, which then leaves the
+  cluster: it arrives as a node failure and it is a configuration difference.
+  The finding names the node holding the cluster's real limit, the smallest
+  non-zero one.
+
+- **`node/durability`** (GD-35) — `innodb_flush_log_at_trx_commit` and
+  `sync_binlog` differing between nodes. A cluster's durability is its weakest
+  node's, not its average, so "committed on every node" can survive a process
+  crash and not a power cut. A uniform relaxed setting is the cluster's
+  decision and stays quiet; the nodes disagreeing is the finding.
+
+- **`cluster/segments`** (GD-31) — the `gmcast.segment` map, reported as the
+  map it is, because the intent behind one lives in somebody's head rather than
+  in the server. The single shape that cannot be deliberate is graded: every
+  node in a segment of its own, which turns off the one thing segments buy —
+  one copy of a write-set per segment instead of one per node.
+
 ## [0.4.0] - 2026-09-02
 
 ### Added

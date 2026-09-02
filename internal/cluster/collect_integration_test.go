@@ -41,6 +41,16 @@ func TestCollectAgainstARealServer(t *testing.T) {
 			t.Fatalf("neither mysql.user nor mysql.global_priv was fingerprinted: %d tables", len(snap.SysTables))
 		}
 	}
+	// GD-16: the clock. An epoch scanned into the wrong type, or a server whose
+	// time_zone makes NOW() something other than what UNIX_TIMESTAMP expects,
+	// both come back as a wildly wrong skew — and a fixture cannot tell.
+	if snap.Clock.IsZero() {
+		t.Fatal("the server clock was not read: the zero value means \"not audited\" to the audit")
+	}
+	if skew := snap.Clock.Sub(snap.At); skew > time.Minute || skew < -time.Minute {
+		t.Fatalf("the server clock is %s away from this host's: the epoch conversion is wrong", skew)
+	}
+
 	// GD-13: the application fingerprints. A nil map here would mean "the
 	// schemas were not read", which the audit reports as a node it could not
 	// compare — so the difference between nil and empty is load-bearing, and
@@ -86,4 +96,5 @@ func TestCollectAgainstARealServer(t *testing.T) {
 	}
 	t.Logf("read %d status, %d variables, %d system tables, %d application tables, %d without a primary key, %d not on a replicated engine",
 		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.AppTables), len(snap.TablesNoPK), len(snap.TablesNonInnoDB))
+	t.Logf("clock skew against this host: %s", snap.Clock.Sub(snap.At))
 }

@@ -33,6 +33,7 @@ These are the states this tool exists for:
 | **The next restart cannot rejoin** | `wsrep_sst_donor` naming a server that was decommissioned in March, or an SST method the donors cannot serve. Everything is Synced and green until the node restarts, and then it either refuses to start or takes an unexpected donor out of service. |
 | **A split brain that is already configured** | `pc.ignore_sb` left on after somebody recovered a cluster by hand, or quorum weights that are not one vote per node. Nothing is exercised until the network moves — and then both sides stay writable. |
 | **Tables Galera does not replicate at all** | A MyISAM or Aria table in an application schema. The write succeeds, nothing certifies it, no counter records it, and the rows exist on exactly one node. |
+| **Durability that is not the cluster's** | A cluster's durability is its weakest node's, not its average. One node acknowledging a commit before its log reaches the disk turns "committed on three nodes" into something else — and each node is doing exactly what it was told, so nothing reports it. |
 | **Flow control that already happened** | `wsrep_flow_control_paused` covers the time since the last status reset, so an incident from March reads the same today. Graded as a lifetime total it goes red once and stays red. |
 
 ## What a run looks like
@@ -92,6 +93,10 @@ cluster/versions                           mixed server or wsrep provider versio
 gcache/window                              how much time the gcache buys before a restart needs a full SST (needs --state)
 gcache/recover                             a clean restart that discards the write-set cache anyway
 repl/osu-method                            a node on RSU: DDL applied here and not replicated
+repl/ws-limits                             appliers that will refuse a write-set the cluster certified
+node/clock                                 the spread between the nodes' own clocks
+node/durability                            a cluster whose durability is one node's, not its average
+cluster/segments                           the segment map, and the one shape that cannot be deliberate
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
 ```
 

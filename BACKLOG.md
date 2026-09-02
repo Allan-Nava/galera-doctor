@@ -92,9 +92,9 @@ touching this file, or CI will fail.
 - [ ] **GD-15 — SST/IST history**: read the recent state transfers from the
   error log or the status counters, so a cluster that quietly full-syncs a node
   every week is visible. <!-- gd: prio=med size=L labels=check -->
-- [ ] **GD-16 — Node clock skew**: compare each node's clock with the auditing
+- [x] **GD-16 — Node clock skew**: compare each node's clock with the auditing
   host. Certification and log correlation both suffer, and it is one query.
-  <!-- gd: prio=med size=S labels=check -->
+  <!-- gd: prio=med size=S labels=check ver=0.5.0 -->
 - [ ] **GD-17 — Cross-DC latency from the cluster's own numbers**: segment
   configuration versus the observed apply and send queues, to say whether a
   node is slow or simply far away. <!-- gd: prio=med size=L labels=check -->
@@ -183,16 +183,16 @@ write-set limits, the segment map. Each of them is uniform in every diagram and
 different on one server, and the difference only surfaces when the cluster is
 asked to behave as one thing.
 
-- [ ] **GD-30 — Write-set limits that disagree**: `wsrep_max_ws_size` and
+- [x] **GD-30 — Write-set limits that disagree**: `wsrep_max_ws_size` and
   `wsrep_max_ws_rows` across nodes. A transaction that certifies on the node
   that accepted it and is refused by an applier with a smaller limit takes that
   applier out of the cluster, which reads as a node failure rather than as the
-  configuration difference it is. <!-- gd: prio=med size=S labels=check -->
-- [ ] **GD-31 — The segment map against the topology**: `gmcast.segment` per
+  configuration difference it is. <!-- gd: prio=med size=S labels=check ver=0.5.0 -->
+- [x] **GD-31 — The segment map against the topology**: `gmcast.segment` per
   node next to the addresses. Two nodes in the same datacentre in different
   segments, or three datacentres all in segment 0, is a WAN bill and a slow
   cluster that replicates perfectly. Complements GD-17, which measures the
-  latency rather than the intent. <!-- gd: prio=med size=M labels=check -->
+  latency rather than the intent. <!-- gd: prio=med size=M labels=check ver=0.5.0 -->
 - [ ] **GD-32 — What changed since the last run**: the state file already holds
   the previous run's findings; print the transitions — appeared, cleared, got
   worse — for the person who ran the audit twenty minutes ago and needs to know
@@ -209,10 +209,51 @@ asked to behave as one thing.
   `schema/drift` reports comes to exist. Reporting the cause next to the
   symptom is the difference between a finding and a diagnosis.
   <!-- gd: prio=high size=S labels=check ver=0.4.0 -->
-- [ ] **GD-35 — Durability that is not the cluster's**:
+- [x] **GD-35 — Durability that is not the cluster's**:
   `innodb_flush_log_at_trx_commit` and `sync_binlog` across nodes. A cluster's
   durability is the weakest node's, not the average: one node set to flush
   once a second turns "committed on three nodes" into "committed on two and
   probably a third" the moment the power goes. Nothing reports it because each
   node is doing exactly what it was told.
+  <!-- gd: prio=med size=S labels=check ver=0.5.0 -->
+
+## M6 — Configured, and not running <!-- ms: target=v0.6.0 phase=next -->
+
+Everything shipped so far compares nodes with each other. This milestone
+compares what a node is *configured to believe* with what is actually there:
+the peer list against the membership, the applier settings against the queues,
+the proxy's monitor against the proxy's own tables. A configuration that
+describes a cluster which no longer exists is the quietest failure in the set —
+it costs nothing until the process restarts and looks for the cluster it was
+told about.
+
+- [ ] **GD-38 — The peer list against the membership**: `wsrep_cluster_address`
+  per node, resolved against the nodes actually in the component. A node whose
+  list names two servers that were decommissioned, or that does not name the
+  node that is currently the only other member, starts fine today and cannot
+  find the cluster after a restart. <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-39 — Flow control that one node decides for everybody**:
+  `gcs.fc_limit`, `gcs.fc_factor` and `gcs.fc_master_slave` per node. The
+  cluster throttles when the slowest queue hits its own limit, so a node
+  configured with a smaller one paces every writer in the cluster — and
+  `flow/paused` reports the symptom without the reason.
+  <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-40 — Appliers that are not the same size**: `wsrep_slave_threads`
+  per node, reported next to that node's receive queue. A node with a quarter
+  of its peers' apply threads is slower by configuration rather than by load,
+  which is a different fix from "look at its disk".
   <!-- gd: prio=med size=S labels=check -->
+- [ ] **GD-41 — What a rejoin will actually copy**: the dataset size from
+  `information_schema.TABLES` next to the gcache window and the SST method, so
+  "this node needs a full SST" comes with the number of gigabytes that implies
+  and the donor it will take out of service. <!-- gd: prio=med size=M labels=check -->
+- [ ] **GD-42 — A proxy whose monitor stopped**: ProxySQL's Galera monitor
+  writes the hostgroups this tool already compares. When the monitor is
+  disabled or its checks are failing, those hostgroups are a photograph: every
+  proxysql/* finding agrees with the cluster and none of it is live.
+  <!-- gd: prio=high size=M labels=proxysql -->
+- [ ] **GD-43 — What this run could not audit**: one finding summarising the
+  checks that did not run and why — a missing grant, a metric this build does
+  not have, a node that could not be read. A cron job needs one line to know
+  whether "no findings" meant "nothing is wrong".
+  <!-- gd: prio=med size=S labels=output -->

@@ -48,10 +48,18 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			"wsrep_sst_donor":  "",
 			"wsrep_sst_auth":   "********",
 			"wsrep_node_name":  name,
+			// Limits and durability: uniform in every diagram, per node in
+			// every server.
+			"wsrep_max_ws_size":              "2147483647",
+			"wsrep_max_ws_rows":              "0",
+			"innodb_flush_log_at_trx_commit": "1",
+			"sync_binlog":                    "1",
 		},
 		SysTables: map[string]string{"user": "aaaaaaaaaaaaaaaa", "column_stats": "bbbbbbbbbbbbbbbb"},
 		// A non-nil map is "the application schemas were read"; nil is "they
 		// were not", which is a different finding from "there are none".
+		// The server's own clock, read in the same snapshot.
+		Clock:     at,
 		AppTables: map[string]string{"app.users": "1111111111111111", "app.events": "2222222222222222"},
 	}
 }
@@ -1011,5 +1019,155 @@ func TestRSUAndDriftAreBothReported(t *testing.T) {
 	}
 	if !drift {
 		t.Fatalf("the drift must still be reported next to its cause: %+v", rep.Findings)
+	}
+}
+
+// GD-16 — node clock skew. Certification does not need the clocks to agree;
+// every human reading two error logs side by side does.
+func TestClockSkewBetweenNodesIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Clock = now.Add(4 * time.Second)
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/clock")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the node that is out must be named: %q", f.Message)
+	}
+	if f.Value == nil || *f.Value < 3.9 || *f.Value > 4.1 {
+		t.Fatalf("the spread has to be the measurement: %v", f.Value)
+	}
+}
+
+func TestALargeClockSkewIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Clock = now.Add(-5 * time.Minute)
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/clock")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+}
+
+func TestAgreeingClocksAreOK(t *testing.T) {
+	f := one(t, Run(threeHealthy(), nil, opts()), "node/clock")
+	if f.Status != finding.OK {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// A clock that was not read is not a clock that agrees.
+func TestAnUnreadClockIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Clock = time.Time{}
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "node/clock"); len(fs) != 0 {
+		t.Fatalf("a clock nobody read cannot be graded: %+v", fs)
+	}
+}
+
+// GD-30 — write-set limits that disagree. The transaction certifies on the node
+// that accepted it and is refused by the applier with the smaller limit, which
+// reads as a node failure rather than as the configuration difference it is.
+func TestDisagreeingWriteSetLimitsAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["wsrep_max_ws_size"] = "10485760"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/ws-limits")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "ov-03") {
+		t.Fatalf("the node with the smallest limit must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "node failure") {
+		t.Fatalf("the hint has to say how it will be misread: %q", f.Hint)
+	}
+}
+
+func TestAgreeingWriteSetLimitsAreQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "repl/ws-limits"); len(fs) != 0 {
+		t.Fatalf("equal limits are not a finding: %+v", fs)
+	}
+}
+
+// GD-35 — durability is the weakest node's, not the average.
+func TestWeakerDurabilityOnOneNodeIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["innodb_flush_log_at_trx_commit"] = "2"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/durability")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "sg-01") {
+		t.Fatalf("the weakest node must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "weakest") {
+		t.Fatalf("the hint has to say what the cluster's durability actually is: %q", f.Hint)
+	}
+}
+
+func TestUniformDurabilityIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "node/durability"); len(fs) != 0 {
+		t.Fatalf("uniform durability is a choice, not a finding: %+v", fs)
+	}
+}
+
+// Every node set to the same relaxed value is the cluster's decision, not a
+// drift — this tool does not have an opinion about it.
+func TestUniformlyRelaxedDurabilityIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["innodb_flush_log_at_trx_commit"] = "0"
+		snaps[i].Vars["sync_binlog"] = "0"
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "node/durability"); len(fs) != 0 {
+		t.Fatalf("a uniform choice is not a finding: %+v", fs)
+	}
+}
+
+// GD-31 — the segment map. Reported as the map it is, because the intent
+// behind it lives in somebody's head and not in the server.
+func TestTheSegmentMapIsReported(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_provider_options"] = "gcache.size = 512M; gmcast.segment = 0;"
+	snaps[1].Vars["wsrep_provider_options"] = "gcache.size = 512M; gmcast.segment = 0;"
+	snaps[2].Vars["wsrep_provider_options"] = "gcache.size = 512M; gmcast.segment = 1;"
+	f := one(t, Run(snaps, nil, opts()), "cluster/segments")
+	if f.Status != finding.OK {
+		t.Fatalf("two segments over three nodes is a normal topology: %+v", f)
+	}
+	if !strings.Contains(f.Message, "sg-01") || !strings.Contains(f.Message, "ov-03") {
+		t.Fatalf("the map must name the nodes: %q", f.Message)
+	}
+}
+
+// Every node in its own segment turns off the one thing segments are for: one
+// copy of a write-set per segment instead of one per node.
+func TestEveryNodeInItsOwnSegmentWarns(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_provider_options"] = fmt.Sprintf("gcache.size = 512M; gmcast.segment = %d;", i)
+	}
+	f := one(t, Run(snaps, nil, opts()), "cluster/segments")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Hint, "per segment") {
+		t.Fatalf("the hint has to say what segments buy: %q", f.Hint)
+	}
+}
+
+func TestNoSegmentsReportedIsNotGraded(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "cluster/segments"); len(fs) != 0 {
+		t.Fatalf("an option nobody reported cannot be graded: %+v", fs)
 	}
 }

@@ -33,6 +33,10 @@ type Node struct {
 type Snapshot struct {
 	Node string    `json:"node"`
 	At   time.Time `json:"at"`
+	// Clock is the server's own clock, read in the same round trip as
+	// everything else. The zero value means it was not read — which is not the
+	// same as a server whose clock agrees.
+	Clock time.Time `json:"clock,omitempty"`
 	// Status and Vars are SHOW GLOBAL STATUS and SHOW GLOBAL VARIABLES, keyed
 	// lowercase so a caller never has to guess the server's capitalisation.
 	Status map[string]string `json:"status,omitempty"`

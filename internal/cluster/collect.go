@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -83,6 +84,18 @@ func (c Collector) Collect(ctx context.Context, n Node) Snapshot {
 		return snap
 	}
 
+	// The clock first, and stamped with this host's time immediately before the
+	// round trip: the skew this measures is only as good as the gap between the
+	// two readings, and reading it after 1200 status variables would fold the
+	// server's own response time into the number.
+	snap.At = c.now()
+	if snap.Clock, err = serverClock(ctx, db); err != nil {
+		// A server that will not answer this is not a server whose clock
+		// agrees: the zero value means "not read" and the check says so.
+		snap.Clock = time.Time{}
+		_ = err
+	}
+
 	if snap.Status, err = keyValue(ctx, db, "SHOW GLOBAL STATUS"); err != nil {
 		snap.Err = redact(err.Error(), n.DSN)
 		return snap
@@ -144,6 +157,34 @@ func (c Collector) now() time.Time {
 		return c.Now()
 	}
 	return time.Now()
+}
+
+// serverClock reads the server's own clock as a Unix timestamp (GD-16).
+//
+// UNIX_TIMESTAMP(NOW(6)) rather than NOW(): an epoch is the same number
+// whatever the server's time_zone is set to, and the microseconds matter
+// because a sub-second skew is inside the round trip.
+func serverClock(ctx context.Context, db *sql.DB) (time.Time, error) {
+	rows, err := Query(ctx, db, "SELECT UNIX_TIMESTAMP(NOW(6))")
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return time.Time{}, err
+		}
+		return time.Time{}, fmt.Errorf("no row from UNIX_TIMESTAMP(NOW(6))")
+	}
+	var epoch float64
+	if err := rows.Scan(&epoch); err != nil {
+		return time.Time{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, err
+	}
+	sec, frac := math.Modf(epoch)
+	return time.Unix(int64(sec), int64(frac*float64(time.Second))).UTC(), nil
 }
 
 // keyValue reads a two-column SHOW into a lowercase-keyed map.

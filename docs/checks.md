@@ -170,6 +170,51 @@ nodes sharing an `auto_increment_offset` is `BAD` (the ids collide as soon as
 both take writes, and the damage lands in application data), and a step smaller
 than the number of nodes is `WARN`.
 
+### `repl/ws-limits`
+
+`wsrep_max_ws_size` and `wsrep_max_ws_rows` differing between nodes. A write-set
+is certified on the node that accepted it and then applied everywhere: an
+applier whose limit is smaller refuses it and leaves the cluster. That arrives
+as a node failure, and it is a configuration difference. The finding names the
+node holding the cluster's real limit — the smallest non-zero one, since 0 is
+"unlimited".
+
+### `node/clock`
+
+The spread between the nodes' own clocks, read as
+`UNIX_TIMESTAMP(NOW(6))` in the same round trip as everything else — an epoch,
+so a server's `time_zone` cannot change the answer.
+
+The nodes are compared **with each other**, not with the machine running the
+audit, because this host's NTP is not a reference either. Replication is
+unaffected: Galera orders writes by sequence number, not by time. Everything a
+human does during an incident is affected — reading two error logs side by side,
+correlating a spike with a backup, believing a timestamp. Thresholds:
+`--clock-warn` (2s) and `--clock-bad` (30s). A clock that could not be read is
+reported as not graded rather than as a clock that agrees.
+
+### `node/durability`
+
+`innodb_flush_log_at_trx_commit` and `sync_binlog` differing between nodes. A
+cluster's durability is its **weakest** node's, not its average: on a node that
+acknowledges a commit before the log reaches the disk, "committed on every node"
+survives a process crash and not a power cut.
+
+A uniform relaxed setting is not a finding — that is the cluster's decision, and
+this tool does not have an opinion about it. The nodes disagreeing is the
+finding.
+
+### `cluster/segments`
+
+The `gmcast.segment` map, reported as the map it is: which nodes are in which
+segment. A write-set crosses a link once per segment rather than once per node,
+and the intent behind a particular map lives in somebody's head rather than in
+the server — so this is `OK` with the map in the message.
+
+The one shape that cannot be deliberate is graded: every node in a segment of
+its own, which turns the optimisation off entirely and makes every node pay the
+WAN transfer separately.
+
 ### `gcache/window`
 
 Not the gcache size: the **time** it buys at the current write rate. 512 MB is

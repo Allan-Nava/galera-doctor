@@ -73,6 +73,8 @@ flags:
   --flow-warn F            flow-control share of the interval to WARN at (default 0.01)
   --flow-bad F             ... and to call BAD (default 0.10)
   --ist-warn D             gcache window below which a restart means a full SST (default 30m)
+  --clock-warn D           spread between node clocks to WARN at (default 2s)
+  --clock-bad D            ... and to call BAD (default 30s)
   --json                   full report
   --findings               flat findings array
   --min-severity S         hide findings below S (OK|WARN|BAD|ERROR)
@@ -114,6 +116,10 @@ func cmdChecks() int {
 		{"gcache/window", "how much time the gcache buys before a restart needs a full SST (needs --state)"},
 		{"gcache/recover", "a clean restart that discards the write-set cache anyway"},
 		{"repl/osu-method", "a node on RSU: DDL applied here and not replicated"},
+		{"repl/ws-limits", "appliers that will refuse a write-set the cluster certified"},
+		{"node/clock", "the spread between the nodes' own clocks"},
+		{"node/durability", "a cluster whose durability is one node's, not its average"},
+		{"cluster/segments", "the segment map, and the one shape that cannot be deliberate"},
 		{"proxysql/*", "the proxy's view against the cluster's (needs --proxysql)"},
 	}
 	for _, r := range rows {
@@ -156,6 +162,8 @@ func cmdAudit(args []string) int {
 		flowWarn    = fs.Float64("flow-warn", 0.01, "flow-control share to WARN at")
 		flowBad     = fs.Float64("flow-bad", 0.10, "flow-control share to call BAD")
 		istWarn     = fs.Duration("ist-warn", 30*time.Minute, "gcache window below which a restart means a full SST")
+		clockWarn   = fs.Duration("clock-warn", 2*time.Second, "spread between node clocks to WARN at")
+		clockBad    = fs.Duration("clock-bad", 30*time.Second, "spread between node clocks to call BAD")
 		asJSON      = fs.Bool("json", false, "full JSON report")
 		asFindings  = fs.Bool("findings", false, "flat findings array")
 		minSev      = fs.String("min-severity", "", "hide findings below this status")
@@ -213,6 +221,7 @@ func cmdAudit(args []string) int {
 	ctx := context.Background()
 	opt := audit.DefaultOptions()
 	opt.FlowWarn, opt.FlowBad, opt.ISTWarn = *flowWarn, *flowBad, *istWarn
+	opt.ClockWarn, opt.ClockBad = *clockWarn, *clockBad
 	opt.Now = time.Now()
 
 	var reps []audit.Report
