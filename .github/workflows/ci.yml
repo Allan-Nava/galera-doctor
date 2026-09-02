@@ -38,6 +38,12 @@ jobs:
       - name: Test with the race detector
         run: go test -race ./...
 
+      # The release tooling builds a real binary, so it needs the toolchain
+      # this job already has. A release script is exercised once per version,
+      # in CI, with a permanent tag on the line.
+      - name: The release tooling
+        run: sh scripts/release_test.sh
+
       - run: go build ./...
 
       # One dependency, on purpose: the MySQL driver, plus what it needs. A
@@ -122,6 +128,8 @@ jobs:
         run: sh scripts/site_test.sh
       - name: The About box tooling, against a fake gh
         run: sh scripts/repo_test.sh
+      - name: The Homebrew formula
+        run: sh scripts/brew_test.sh
 
       - name: Every local link resolves
         run: ./scripts/links.sh

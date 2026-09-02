@@ -108,9 +108,14 @@ touching this file, or CI will fail.
   module in [checkfleet](https://github.com/Allan-Nava/checkfleet), so a fleet
   already described there gains the check without a second inventory.
   <!-- gd: prio=high size=M labels=integration -->
-- [ ] **GD-20 — Release pipeline**: tag-driven archives for six platforms with
+- [x] **GD-20 — Release pipeline**: tag-driven archives for six platforms with
   `SHA256SUMS`, an attestation, the `ghcr.io` image and notes lifted from the
-  CHANGELOG. <!-- gd: prio=high size=M labels=release -->
+  CHANGELOG. <!-- gd: prio=high size=M labels=release ver=0.3.0 -->
+- [x] **GD-37 — Homebrew, from the release's own checksums**: `Formula/` in this
+  repository is the tap, and `scripts/brew.sh` renders the formula from the
+  `SHA256SUMS` the release workflow computed over the bytes it uploaded — a
+  checksum somebody retyped is a formula that fails on the one machine that
+  matters. <!-- gd: prio=med size=S labels=delivery ver=0.3.0 -->
 - [ ] **GD-21 — Docs site**: `docs/` published with the same POSIX-sh generator
   the sibling tools use, with a dead-link gate in CI.
   <!-- gd: prio=med size=M labels=docs -->

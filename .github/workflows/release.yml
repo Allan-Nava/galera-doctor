@@ -1,0 +1,126 @@
+name: Release
+
+# A tag is the trigger and the version: scripts/release.sh builds the same
+# artefacts a maintainer can build by hand, and scripts/brew.sh renders the
+# formula from the checksums this run produced rather than from a number
+# somebody retyped.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.2.1)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release, and the generated formula
+      id-token: write # provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: The tag being released
+        id: v
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >>"$GITHUB_OUTPUT"
+
+      # A release of code that does not pass its own tests is worse than no
+      # release: the tag is permanent.
+      - run: go test -race ./...
+
+      - name: Build every platform
+        run: ./scripts/release.sh build "${{ steps.v.outputs.tag }}" dist
+
+      - name: Release notes, lifted from CHANGELOG.md
+        run: ./scripts/release.sh notes "${{ steps.v.outputs.tag }}" >notes.md
+
+      # What was built, signed by the workflow that built it. `gh attestation
+      # verify` checks a downloaded archive against this.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.v.outputs.tag }}" \
+            --title "galera-doctor ${{ steps.v.outputs.tag }}" \
+            --notes-file notes.md \
+            dist/*.tar.gz dist/SHA256SUMS
+
+      # The formula is generated from this run's own SHA256SUMS. It lives in
+      # this repository, which is the tap: `brew tap Allan-Nava/galera-doctor
+      # https://github.com/Allan-Nava/galera-doctor`.
+      - name: Render the Homebrew formula
+        run: ./scripts/brew.sh write "${{ steps.v.outputs.tag }}" dist/SHA256SUMS
+
+      - name: Commit the formula if it changed
+        run: |
+          if git diff --quiet -- Formula/; then
+            echo "the formula is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/
+          git commit -m "Formula: galera-doctor ${{ steps.v.outputs.tag }} [skip ci]"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag being released
+        id: v
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >>"$GITHUB_OUTPUT"
+
+      # The Dockerfile cross-compiles with the Go toolchain rather than under
+      # emulation, so arm64 costs a few seconds instead of several minutes.
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/build-push-action@v6
+        id: push
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ steps.v.outputs.version }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/galera-doctor:${{ steps.v.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/galera-doctor:latest
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/galera-doctor
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

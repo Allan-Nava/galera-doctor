@@ -165,15 +165,20 @@ a claim.
 ## Install
 
 ```sh
+# Homebrew — this repository is the tap
+brew tap Allan-Nava/galera-doctor https://github.com/Allan-Nava/galera-doctor
+brew install galera-doctor
+
+# a container that holds nothing but the binary
+docker run --rm ghcr.io/allan-nava/galera-doctor:latest checks
+
+# or the Go toolchain
 go install github.com/Allan-Nava/galera-doctor/cmd/galera-doctor@latest
 ```
 
-Or build the static binary, and the image that contains nothing else:
-
-```sh
-go build -o galera-doctor ./cmd/galera-doctor
-docker build -t galera-doctor .
-```
+Or a release archive: six platforms with a `SHA256SUMS` and a provenance
+attestation (`gh attestation verify`), built by the tag itself. See
+[install](docs/install.md).
 
 ## Output and exit status
 
@@ -223,6 +228,8 @@ stale generated file fails the build instead of rotting:
 
 ```sh
 scripts/backlog.sh roadmap   # regenerate ROADMAP.md from BACKLOG.md
+scripts/release.sh build 0.0.0-dev dist   # the release artefacts, locally
+scripts/brew.sh render v0.0.0-dev dist/SHA256SUMS  # the formula they imply
 scripts/links.sh             # every local link in the docs and the site resolves
 scripts/site.sh serve        # the landing page in site/, on localhost:8000
 scripts/repo.sh apply        # write .github/repo.env to the GitHub About box
