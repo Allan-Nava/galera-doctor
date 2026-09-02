@@ -1,0 +1,39 @@
+name: Pages
+
+# The site is the static page in site/ — no Jekyll, no build step, nothing to
+# keep in sync with the docs beyond the links it points at.
+on:
+  push:
+    branches: ["main"]
+    paths: ["site/**", "assets/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A queued run is not worth cancelling a deploy for.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # assets/ is the source of truth for the logo; site/ only carries a copy.
+      - name: Sync the logo into the site
+        run: cp assets/mark.svg assets/logo.svg assets/logo-dark.svg site/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - uses: actions/deploy-pages@v4
+        id: deploy

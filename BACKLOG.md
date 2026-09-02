@@ -117,3 +117,7 @@ touching this file, or CI will fail.
 - [ ] **GD-22 — Percona XtraDB Cluster and MySQL Group Replication**: the first
   is nearly free, the second is a different model and needs its own checks
   rather than a rename. <!-- gd: prio=low size=XL labels=check -->
+- [x] **GD-23 — Identity and landing page**: a logo in `assets/`, `INTENT.md`
+  as the charter (why the tool exists, what it will never become) and a
+  dependency-free GitHub Pages landing page in `site/`, deployed by its own
+  workflow. <!-- gd: prio=med size=S labels=docs,project ver=0.1.1 -->

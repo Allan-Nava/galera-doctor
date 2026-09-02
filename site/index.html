@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>galera-doctor — the Galera states no wsrep_* counter can show you</title>
+<meta name="description" content="A read-only audit of a MariaDB/MySQL Galera cluster that reports the states the cluster's own metrics cannot show you. One static Go binary, only SHOW and SELECT.">
+<link rel="icon" href="mark.svg" type="image/svg+xml">
+<meta property="og:title" content="galera-doctor">
+<meta property="og:description" content="The Galera states no wsrep_* counter can show you. Read-only, one static Go binary.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="logo.svg">
+<style>
+  :root {
+    --bg: #0b1120;
+    --bg-soft: #111a2e;
+    --panel: #0f172a;
+    --line: #1e293b;
+    --fg: #e2e8f0;
+    --fg-dim: #94a3b8;
+    --fg-faint: #64748b;
+    --green: #10b981;
+    --green-deep: #0f766e;
+    --amber: #f59e0b;
+    --red: #f87171;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.65 var(--sans);
+    background-image: radial-gradient(1000px 460px at 50% -180px, rgba(16,185,129,.16), transparent 70%);
+  }
+  a { color: var(--green); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 22px; }
+  code, pre, kbd { font-family: var(--mono); }
+
+  header { padding: 64px 0 8px; text-align: center; }
+  header img { width: 92px; height: 92px; }
+  h1 {
+    font-family: var(--mono); font-size: clamp(30px, 6vw, 46px);
+    margin: 20px 0 6px; letter-spacing: -.02em;
+  }
+  h1 .suffix { color: var(--green); }
+  .tagline { color: var(--fg-dim); font-size: clamp(16px, 2.4vw, 19px); margin: 0 auto; max-width: 34em; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 24px 0 0; }
+  .badge {
+    font-family: var(--mono); font-size: 12px; color: var(--fg-dim);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; background: var(--bg-soft);
+  }
+  .badge b { color: var(--green); font-weight: 600; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 28px 0 0; }
+  .cta a {
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 18px;
+    font-weight: 600; font-size: 15px; color: var(--fg); background: var(--bg-soft);
+  }
+  .cta a.primary { background: var(--green-deep); border-color: var(--green); color: #f0fdf9; }
+  .cta a:hover { text-decoration: none; border-color: var(--green); }
+
+  section { padding: 56px 0 0; }
+  h2 {
+    font-size: 13px; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--fg-faint); font-weight: 700; margin: 0 0 18px;
+    border-bottom: 1px solid var(--line); padding-bottom: 10px;
+  }
+  h3 { font-size: 17px; margin: 0 0 6px; }
+  p { margin: 0 0 16px; }
+  .lede { color: var(--fg-dim); }
+
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.6; margin: 0 0 18px;
+  }
+  pre .p { color: var(--fg-faint); }
+  pre .bad { color: var(--red); font-weight: 700; }
+  pre .warn { color: var(--amber); font-weight: 700; }
+  pre .ok { color: var(--green); font-weight: 700; }
+  pre .k { color: var(--fg); }
+  pre .hint { color: var(--fg-dim); }
+
+  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .card { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .card p { color: var(--fg-dim); font-size: 14.5px; margin: 0; }
+  .card .why { display: block; margin-top: 10px; color: var(--fg-faint); font-size: 13px; font-family: var(--mono); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  td, th { text-align: left; vertical-align: top; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--fg-faint); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+  td code { color: var(--green); font-size: 13.5px; }
+  .scroll { overflow-x: auto; }
+
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 9px 0; border-bottom: 1px solid var(--line); color: var(--fg-dim); font-size: 14.5px; }
+  ul.plain li b { color: var(--fg); }
+
+  footer {
+    margin-top: 64px; padding: 26px 0 46px; border-top: 1px solid var(--line);
+    color: var(--fg-faint); font-size: 13.5px; text-align: center;
+  }
+  footer a { color: var(--fg-dim); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #ffffff; --bg-soft: #f8fafc; --panel: #0f172a; --line: #e2e8f0;
+      --fg: #0f172a; --fg-dim: #475569; --fg-faint: #64748b;
+    }
+    :root:not([data-theme="dark"]) pre { color: #e2e8f0; border-color: #0f172a; }
+    :root:not([data-theme="dark"]) body {
+      background-image: radial-gradient(1000px 460px at 50% -200px, rgba(16,185,129,.13), transparent 70%);
+    }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <img src="mark.svg" alt="galera-doctor">
+    <h1>galera<span class="suffix">-doctor</span></h1>
+    <p class="tagline">A read-only audit of a MariaDB/MySQL Galera cluster that reports the
+      states the cluster's own metrics cannot show you.</p>
+    <div class="badges">
+      <span class="badge">one static <b>Go</b> binary</span>
+      <span class="badge">one dependency</span>
+      <span class="badge"><b>SHOW</b> and <b>SELECT</b> only</span>
+      <span class="badge">writes: <b>none</b></span>
+      <span class="badge">MIT</span>
+    </div>
+    <div class="cta">
+      <a class="primary" href="https://github.com/Allan-Nava/galera-doctor">GitHub</a>
+      <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/install.md">Install</a>
+      <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/checks.md">Checks</a>
+      <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/INTENT.md">Intent</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section class="wrap">
+  <h2>What a run looks like</h2>
+  <pre><span class="p">$</span> galera-doctor audit --config clusters.json --cluster compress --state /var/lib/galera-doctor/compress.json
+<span class="bad">BAD</span>   compress  3 node(s)
+  <span class="bad">BAD</span>   <span class="k">cluster/uuid</span>       compress  nodes report different cluster state UUIDs: 5b1e2a8c-111… (cl-02, sg-01) vs 9999aaaa-222… (ov-03)
+        <span class="hint">↳ this is a partition, not a lag: the groups have diverged and one side has to be reinitialised from the other</span>
+  <span class="bad">BAD</span>   <span class="k">systables/drift</span>    mysql.column_stats  definition differs across nodes: aaaaaaaaaaaa… (ov-03, sg-01) vs cccccccccccc… (cl-02)
+        <span class="hint">↳ Galera does not replicate this: fix it per node — no wsrep_* metric will ever show it</span>
+  <span class="warn">WARN</span>  <span class="k">flow/paused</span>        sg-01     flow-controlled 2.10% of the last 10m0s
+        <span class="hint">↳ this node is intermittently the slowest in the cluster; look at its disk and its replication threads</span>
+  <span class="warn">WARN</span>  <span class="k">schema/no-pk</span>       schema    1 table(s) without a primary key: app.events
+  <span class="ok">OK</span>    <span class="k">cluster/size</span>       compress  3 member(s), expected 3</pre>
+  <p class="lede">Three nodes, one cluster, every replication counter green — and one of them has
+    been holding a different definition of a system table since somebody ran
+    <code>mysql_upgrade</code> on two of the three.</p>
+</section>
+
+<section class="wrap">
+  <h2>The states it exists for</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>What is wrong</th><th>Why no <code>wsrep_*</code> metric shows it</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>A system table's definition differs between nodes</b></td>
+        <td>Galera does not replicate maintenance on the server's own <code>mysql.*</code> tables.
+          Two nodes can disagree about <code>mysql.column_stats</code> for months while every
+          replication counter stays green — until one node's query plans go strange.</td>
+      </tr>
+      <tr>
+        <td><b>One name, two clusters</b></td>
+        <td>Each half reports a consistent size and a Primary status. The divergence is only
+          visible by comparing the <code>wsrep_cluster_state_uuid</code> of every node
+          <em>to each other</em>.</td>
+      </tr>
+      <tr>
+        <td><b>The proxy and the cluster disagree</b></td>
+        <td>ProxySQL says ONLINE, the node says Joined. Each dashboard is fine. Traffic is going
+          to a node that is not synced.</td>
+      </tr>
+      <tr>
+        <td><b>The gcache is too small for the write rate</b></td>
+        <td>512 MB is either forty minutes or ninety seconds. Nobody finds out until a node
+          restarts and needs a full SST, taking a donor out of service with it.</td>
+      </tr>
+      <tr>
+        <td><b>Flow control that already happened</b></td>
+        <td><code>wsrep_flow_control_paused</code> covers the time since the last status reset, so
+          an incident from March reads the same today.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>A total is not a rate</h2>
+  <p class="lede">The wsrep counters only go up, and they reset on restart. A threshold over
+    <code>wsrep_flow_control_paused</code> goes red once and stays red — and a check that stays
+    red is a check people stop reading. So <code>--state FILE</code> remembers the counters
+    between runs and the checks grade the <b>interval</b>:</p>
+  <pre>  <span class="warn">WARN</span>  <span class="k">flow/paused</span>   sg-01   flow-controlled 2.10% of the last 10m0s</pre>
+  <p class="lede">Without a baseline the same check reports the lifetime figure and refuses to judge it:</p>
+  <pre>  <span class="ok">OK</span>    <span class="k">flow/paused</span>   sg-01   0.9% of the time since the last status reset (not graded: no baseline)
+        <span class="hint">↳ run again with --state to grade the interval between runs instead of the lifetime total</span></pre>
+  <p class="lede">A counter that went backwards, a node whose uptime shrank, a state file from
+    another format version: all of them mean <em>no baseline</em> — never a negative rate and
+    never a spectacular one.</p>
+</section>
+
+<section class="wrap">
+  <h2>Install</h2>
+  <pre><span class="p">$</span> go install github.com/Allan-Nava/galera-doctor/cmd/galera-doctor@latest
+
+<span class="p"># or the static binary, and the image that contains nothing else</span>
+<span class="p">$</span> go build -o galera-doctor ./cmd/galera-doctor
+<span class="p">$</span> docker build -t galera-doctor .</pre>
+  <p class="lede">Audit one node without a config file at all:</p>
+  <pre><span class="p">$</span> galera-doctor audit --node "sg-01=audit:***@tcp(10.11.1.5:3306)/"</pre>
+</section>
+
+<section class="wrap">
+  <h2>Read-only, mechanically</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>One gate for every query</h3>
+      <p>Every statement goes through a single function that refuses anything but
+        <code>SHOW</code> and <code>SELECT</code>.</p>
+      <span class="why">a property, not a promise</span>
+    </div>
+    <div class="card">
+      <h3>CI greps the source</h3>
+      <p>The build fails on a writing statement or an <code>Exec</code> anywhere in the tree.</p>
+      <span class="why">enforced on every commit</span>
+    </div>
+    <div class="card">
+      <h3>No DSN in the output</h3>
+      <p>Nodes are identified by name and driver errors are redacted — findings end up in tickets.</p>
+      <span class="why">redact before render</span>
+    </div>
+    <div class="card">
+      <h3>It says what it could not read</h3>
+      <p>An unreachable node is an <code>ERROR</code>, because every cluster-wide statement below
+        it was made without that node.</p>
+      <span class="why">never a silent omission</span>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>What it is not</h2>
+  <ul class="plain">
+    <li><b>Not a monitoring system.</b> No daemon, no scraper, no history beyond the one state
+      file it uses for rates. It is what you run from cron, a CI job or an incident.</li>
+    <li><b>Not a generic MySQL health check.</b> Connections, buffer pool, slow queries and
+      replica lag belong in <a href="https://github.com/Allan-Nava/checkfleet">checkfleet</a>.
+      This one only knows about Galera.</li>
+    <li><b>Not a repair tool.</b> It reports; a human decides. Bootstrapping a cluster, dropping
+      a peer or resyncing a node are operations with consequences, and they are not one flag
+      away here.</li>
+  </ul>
+</section>
+
+<section class="wrap">
+  <h2>Docs</h2>
+  <ul class="plain">
+    <li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/install.md"><b>Install</b></a> — binary, <code>go install</code>, container</li>
+    <li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/usage.md"><b>Usage</b></a> — flags, config, output, exit status</li>
+    <li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/checks.md"><b>Checks</b></a> — every check, what it grades and why</li>
+    <li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/rates.md"><b>Rates, not totals</b></a> — the state file, and why a counter is never a verdict</li>
+    <li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/safety.md"><b>Permissions and safety</b></a> — the grants it needs, the writes it cannot do</li>
+    <li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/INTENT.md"><b>Intent</b></a> — why it exists, and what it will never become</li>
+    <li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/ROADMAP.md"><b>Roadmap</b></a> — generated from <code>BACKLOG.md</code></li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <a href="https://github.com/Allan-Nava/galera-doctor">Allan-Nava/galera-doctor</a> · MIT ·
+    built by <a href="https://github.com/Allan-Nava">Allan Nava</a>
+  </div>
+</footer>
+
+</body>
+</html>

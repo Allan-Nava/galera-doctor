@@ -8,6 +8,7 @@ cannot show you.**
 - [Checks](checks.md) — every check, what it grades and why
 - [Rates, not totals](rates.md) — the state file, and why a counter is never a verdict
 - [Permissions and safety](safety.md) — the grants it needs, the writes it cannot do
+- [Intent](../INTENT.md) — why it exists, and what it will never become
 
 ## The one-minute version
 

@@ -6,6 +6,16 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.1.1] - 2026-09-02
+
+### Added
+
+- **Identity and landing page** (GD-23) — a logo in `assets/` (three nodes, one
+  of which does not agree with the other two), [INTENT.md](INTENT.md) as the
+  charter for what the tool is for and what it will never become, and a
+  dependency-free landing page in `site/` published to GitHub Pages by its own
+  workflow.
+
 ## [0.1.0] - 2026-09-02
 
 First release: the Galera states that no `wsrep_*` counter can show you, from a

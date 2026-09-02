@@ -1,10 +1,16 @@
-<h1 align="center">galera-doctor</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img alt="galera-doctor" src="assets/logo.svg" width="560">
+  </picture>
+</p>
 
 <p align="center">
   <a href="https://github.com/Allan-Nava/galera-doctor/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Allan-Nava/galera-doctor/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-10b981"></a>
   <img alt="Go" src="https://img.shields.io/badge/go-1.25%2B-00ADD8">
   <img alt="Read only" src="https://img.shields.io/badge/writes-none-10b981">
+  <a href="https://allan-nava.github.io/galera-doctor/"><img alt="Docs" src="https://img.shields.io/badge/docs-galera--doctor-0f766e"></a>
 </p>
 
 ---
@@ -197,7 +203,8 @@ GD_TEST_DSN='root:testpw@tcp(127.0.0.1:13306)/' go test ./internal/cluster/ -run
 ```
 
 `BACKLOG.md` is the single source of truth for planned work and
-[ROADMAP.md](ROADMAP.md) is generated from it. Contributor brief:
+[ROADMAP.md](ROADMAP.md) is generated from it. Why the tool exists and what it
+will never become: [INTENT.md](INTENT.md). Contributor brief:
 [AGENTS.md](AGENTS.md).
 
 ## License
