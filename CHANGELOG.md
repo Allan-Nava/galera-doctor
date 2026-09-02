@@ -6,6 +6,21 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.2.1] - 2026-09-02
+
+### Fixed
+
+- **One label vocabulary** (GD-36) — the label list the backlog linter enforces
+  and the list `scripts/backlog.sh issues --apply` creates on GitHub were two
+  copies of the same data, and they had drifted: the creating one still carried
+  `parser` from a sibling tool and had never heard of `collect` or `proxysql`.
+  Since `gh issue create` treats an unknown label as a hard error, the first
+  apply of an item labelled `collect` would have failed halfway through
+  creating issues. There is now one list with two consumers,
+  `scripts/backlog.sh labels` prints it (`--apply` creates what is missing),
+  and `backlog_issues_test.sh` walks it in both directions — every creatable
+  label must lint, and a label outside the list must still be rejected.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

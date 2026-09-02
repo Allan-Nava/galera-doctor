@@ -9,6 +9,7 @@
 #   scripts/backlog.sh roadmap    regenerate ROADMAP.md
 #   scripts/backlog.sh check      fail if ROADMAP.md is stale (CI gate)
 #   scripts/backlog.sh stats      one-line summary
+#   scripts/backlog.sh labels     the label vocabulary (--apply creates it on GitHub)
 #   scripts/backlog.sh next [n]   the n highest-priority open items (default 5)
 #   scripts/backlog.sh issues     plan the GitHub issue sync (see below)
 #     --apply | --milestones M11,M12 | --body GD-n | --title GD-n
@@ -30,6 +31,42 @@ roadmap="${ROADMAP_FILE:-$root/ROADMAP.md}"
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/galera-doctor-backlog.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT HUP TERM
+
+# ---------------------------------------------------------------------------
+# The label vocabulary, in one place.
+#
+# It used to be two: the linter's list in awk, and a second list inside
+# `issues --apply` that created the labels on GitHub. They drifted — the second
+# one still carried `parser` from a sibling tool and had never heard of
+# `collect` or `proxysql` — and since `gh issue create` treats an unknown label
+# as a hard error, the first apply of an item labelled `collect` would have
+# failed halfway through creating issues. One list, two consumers, and a test
+# that walks it in both directions.
+#
+# The prio-* labels are derived from the `prio=` metadata rather than written on
+# an item, so they are creatable but not part of what the linter accepts.
+labels_spec() {
+	cat <<'EOF'
+collect|1d76db|Reading a node: SQL, snapshots, the state file
+check|0e8a16|An analysis over the snapshots
+output|5319e7|Renderers: terminal, JSON, findings
+cli|fbca04|Flags, exit codes, usage
+proxysql|d93f0b|The proxy's view against the cluster's
+delivery|c2e0c6|Docker image, packaging, install
+integration|bfd4f2|Using galera-doctor from other systems
+tests|d4c5f9|Test coverage and test tooling
+docs|0075ca|Documentation and the Pages site
+release|b60205|Tagging, artefacts, signing
+project|6a737d|Backlog, roadmap, repo hygiene
+prio-high|b60205|High priority in BACKLOG.md
+prio-med|fbca04|Medium priority in BACKLOG.md
+prio-low|c2e0c6|Low priority in BACKLOG.md
+EOF
+}
+
+# label_names prints every name; item_labels prints the ones an item may carry.
+label_names() { labels_spec | cut -d'|' -f1; }
+item_labels() { label_names | grep -v '^prio-'; }
 
 # ---------------------------------------------------------------------------
 # Parse BACKLOG.md into tab-separated records:
@@ -147,15 +184,15 @@ fi
 
 # ---------------------------------------------------------------------------
 lint() {
-	awk -F'\t' '
+	awk -F'\t' -v vocabulary="$(item_labels | tr '\n' ' ')" '
 	function err(msg) { print "BACKLOG.md: " msg > "/dev/stderr"; bad++ }
 
 	BEGIN {
 		split("high med low", p, " ");    for (i in p) okprio[p[i]] = 1
 		split("S M L XL", s, " ");        for (i in s) oksize[s[i]] = 1
 		split("shipped now next later ongoing", f, " "); for (i in f) okphase[f[i]] = 1
-		split("collect check output cli proxysql delivery integration tests docs release project", l, " ")
-		for (i in l) oklabel[l[i]] = 1
+		split(vocabulary, l, " ")
+		for (i in l) if (l[i] != "") oklabel[l[i]] = 1
 	}
 
 	$1 == "L" { line[$3] = $2; next }
@@ -544,31 +581,16 @@ ensure_milestone() {
 # labels silently dropped.
 ensure_labels() {
 	gh label list --limit 200 --json name --jq '.[].name' >"$tmp/labels.txt" 2>/dev/null || : >"$tmp/labels.txt"
-	# Keep in step with the vocabulary lint enforces, plus the priorities.
-	for spec in \
-		"parser|1d76db|Segment and manifest readers" \
-		"check|0e8a16|An analysis over the parsed events" \
-		"output|5319e7|Renderers: terminal, JSON, markdown" \
-		"cli|fbca04|Flags, exit codes, usage" \
-		"delivery|c2e0c6|Docker image, packaging, install" \
-		"integration|bfd4f2|Using galera-doctor from other systems" \
-		"tests|d4c5f9|Test coverage and test tooling" \
-		"docs|0075ca|Documentation and the Pages site" \
-		"release|b60205|Tagging, artefacts, signing" \
-		"project|6a737d|Backlog, roadmap, repo hygiene" \
-		"prio-high|b60205|High priority in BACKLOG.md" \
-		"prio-med|fbca04|Medium priority in BACKLOG.md" \
-		"prio-low|c2e0c6|Low priority in BACKLOG.md"; do
-		name=${spec%%|*}
-		rest=${spec#*|}
-		colour=${rest%%|*}
-		desc=${rest#*|}
+	labels_spec >"$tmp/spec.txt"
+	while IFS='|' read -r name colour desc; do
+		[ -n "$name" ] || continue
 		if ! grep -qxF "$name" "$tmp/labels.txt"; then
 			gh label create "$name" --color "$colour" --description "$desc" >/dev/null
 			echo "  created label $name"
 		fi
-	done
+	done <"$tmp/spec.txt"
 }
+
 
 apply_issues() {
 	ensure_labels
@@ -721,6 +743,20 @@ check)
 stats)
 	stats
 	;;
+labels)
+	case "${2:-}" in
+	--apply)
+		command -v gh >/dev/null 2>&1 || { echo "gh is required to create labels" >&2; exit 2; }
+		ensure_labels
+		echo "the label vocabulary is present on the repository"
+		;;
+	"") label_names ;;
+	*)
+		echo "usage: scripts/backlog.sh labels [--apply]" >&2
+		exit 2
+		;;
+	esac
+	;;
 next)
 	next_items "${2:-5}"
 	;;
@@ -729,7 +765,7 @@ issues)
 	issues_cmd "$@"
 	;;
 *)
-	echo "usage: scripts/backlog.sh [lint|roadmap|check|stats|next [n]]" >&2
+	echo "usage: scripts/backlog.sh [lint|roadmap|check|stats|next [n]|labels [--apply]]" >&2
 	echo "       scripts/backlog.sh issues [--apply] [--milestones M11,M12] [--body GD-n]" >&2
 	exit 2
 	;;

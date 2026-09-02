@@ -41,6 +41,23 @@ assert_plan() {
 	fi
 }
 
+# assert_fails_lint <name> <backlog-file> <needle>
+# The backlog is malformed and lint has to say so, naming the problem.
+assert_fails_lint() {
+	checks=$((checks + 1))
+	if BACKLOG_FILE="$2" sh "$script" lint >"$tmp/lint.out" 2>&1; then
+		fail "$1 — lint accepted it"
+		sed 's/^/       /' "$tmp/lint.out" >&2
+		return
+	fi
+	if grep -qF -e "$3" "$tmp/lint.out"; then
+		echo "ok   $1"
+	else
+		fail "$1 — lint failed for the wrong reason, wanted: $3"
+		sed 's/^/       /' "$tmp/lint.out" >&2
+	fi
+}
+
 # assert_contains <name> <needle> <file>
 assert_contains() {
 	checks=$((checks + 1))
@@ -232,6 +249,57 @@ if BACKLOG_FILE="$tmp/bad.md" sh "$script" issues >"$tmp/plan4.txt" 2>&1; then
 else
 	echo "ok   a malformed backlog stops the sync"
 fi
+
+# ---------------------------------------------------------------------------
+# The label vocabulary has to be one list.
+#
+# It was two: awk's lint accepted `collect` and `proxysql`, and the label
+# creation in `--apply` knew neither — it created `parser`, left over from a
+# sibling tool, instead. Since a label that does not exist is a hard error on
+# `gh issue create`, the first apply of an item labelled `collect` would have
+# failed halfway through creating issues. Both directions are asserted here,
+# because either one alone leaves the other free to drift.
+# ---------------------------------------------------------------------------
+checks=$((checks + 1))
+if sh "$script" labels >"$tmp/labels.txt" 2>&1; then
+	echo "ok   the vocabulary can be listed"
+else
+	fail "scripts/backlog.sh labels does not work"
+	sed 's/^/       /' "$tmp/labels.txt" >&2
+fi
+
+# Every label the linter accepts must be creatable...
+while IFS= read -r label; do
+	[ -n "$label" ] || continue
+	case "$label" in prio-*) continue ;; esac
+	checks=$((checks + 1))
+	cat >"$tmp/label.md" <<EOF
+# Backlog — fixture
+
+## M1 — Things <!-- ms: target=v0.1.0 phase=now -->
+
+- [ ] **GD-1 — One**: an item carrying the label under test.
+  <!-- gd: prio=med size=S labels=$label -->
+EOF
+	if BACKLOG_FILE="$tmp/label.md" sh "$script" lint >"$tmp/lintlabel.txt" 2>&1; then
+		echo "ok   the linter accepts the creatable label $label"
+	else
+		fail "$label can be created but the linter rejects it"
+		sed 's/^/       /' "$tmp/lintlabel.txt" >&2
+	fi
+done <"$tmp/labels.txt"
+
+# ...and a label nobody declared must still be rejected, or the check above is
+# satisfied by a linter that accepts everything.
+cat >"$tmp/label.md" <<'EOF'
+# Backlog — fixture
+
+## M1 — Things <!-- ms: target=v0.1.0 phase=now -->
+
+- [ ] **GD-1 — One**: an item carrying a label that does not exist.
+  <!-- gd: prio=med size=S labels=parser -->
+EOF
+assert_fails_lint "a label outside the vocabulary is rejected" "$tmp/label.md" "unknown label"
 
 echo
 if [ "$failures" -gt 0 ]; then

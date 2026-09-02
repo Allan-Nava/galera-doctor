@@ -128,7 +128,7 @@ touching this file, or CI will fail.
   has a CI gate, so drift fails the build rather than sitting on the repository
   front page. <!-- gd: prio=med size=S labels=project,docs ver=0.1.1 -->
 
-## M4 — What the next restart costs <!-- ms: target=v0.2.0 phase=now -->
+## M4 — What the next restart costs <!-- ms: target=v0.2.0 phase=shipped -->
 
 Every item here is a state that is free today and expensive at the next
 restart, failover or partition: the cluster is Synced, every counter is green,
@@ -136,6 +136,12 @@ and the configuration or the schema has already decided what will happen when
 something moves. That is the same shape as GD-2 — invisible until it is not —
 which is why these belong together rather than one per release.
 
+- [x] **GD-36 — One label vocabulary**: the linter's label list and the list
+  `issues --apply` creates on GitHub were two copies that had already drifted —
+  the second still carried `parser` from a sibling tool and knew neither
+  `collect` nor `proxysql`. One list, two consumers, `scripts/backlog.sh
+  labels` to inspect or create it, and a test that walks it in both directions.
+  <!-- gd: prio=med size=S labels=project,tests ver=0.2.1 -->
 - [x] **GD-25 — SST readiness**: `wsrep_sst_method` compared across nodes, and
   `wsrep_sst_donor` checked against the names the cluster actually has. A node
   whose method differs from its peers', or whose donor list names a server that
@@ -162,6 +168,16 @@ which is why these belong together rather than one per release.
   `wsrep_replicate_myisam` says otherwise. The writes succeed, the counters stay
   green and the rows exist on one node. Sibling of `schema/no-pk` and a
   different diagnosis. <!-- gd: prio=high size=M labels=check ver=0.2.0 -->
+
+## M5 — The cluster you cannot see from one node <!-- ms: target=v0.3.0 phase=next -->
+
+M4 shipped the states that cost you at the next restart. This one continues the
+same line into the settings that are *per node* while everybody talks about
+them as if they were properties of the cluster: durability, DDL method,
+write-set limits, the segment map. Each of them is uniform in every diagram and
+different on one server, and the difference only surfaces when the cluster is
+asked to behave as one thing.
+
 - [ ] **GD-30 — Write-set limits that disagree**: `wsrep_max_ws_size` and
   `wsrep_max_ws_rows` across nodes. A transaction that certifies on the node
   that accepted it and is refused by an applier with a smaller limit takes that
@@ -177,3 +193,21 @@ which is why these belong together rather than one per release.
   worse — for the person who ran the audit twenty minutes ago and needs to know
   whether the thing they did helped. Not a history, and not a daemon: one diff
   against one file. <!-- gd: prio=med size=M labels=output -->
+- [ ] **GD-33 — A restart that throws the gcache away**: `gcache.recover` per
+  node. With it off, a clean restart loses the write-set cache and the node
+  needs a full SST for a two-minute maintenance window — the gcache window
+  check (`gcache/window`) measures a buffer that this setting quietly discards.
+  <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-34 — The DDL method that explains GD-13**: `wsrep_OSU_method` per
+  node. A node left on RSU applies schema changes locally and does not
+  replicate them, which is precisely how the application schema drift that
+  `schema/drift` reports comes to exist. Reporting the cause next to the
+  symptom is the difference between a finding and a diagnosis.
+  <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-35 — Durability that is not the cluster's**:
+  `innodb_flush_log_at_trx_commit` and `sync_binlog` across nodes. A cluster's
+  durability is the weakest node's, not the average: one node set to flush
+  once a second turns "committed on three nodes" into "committed on two and
+  probably a third" the moment the power goes. Nothing reports it because each
+  node is doing exactly what it was told.
+  <!-- gd: prio=med size=S labels=check -->
