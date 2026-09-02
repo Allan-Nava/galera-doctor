@@ -122,6 +122,7 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(certification(live, prev, rep.State)...)
 	add(queues(live, opt)...)
 	add(sysTableDrift(rep.Cluster, live)...)
+	add(schemaDrift(rep.Cluster, live)...)
 	add(primaryKeys(live)...)
 	add(versions(rep.Cluster, live)...)
 	add(gcache(live, prev, rep.State, opt)...)
@@ -511,6 +512,103 @@ func sysTableDrift(name string, live []cluster.Snapshot) []finding.Finding {
 			Check: "systables/drift", Target: name, Status: finding.OK,
 			Message: fmt.Sprintf("%d system table(s) identical across %d node(s)", len(names), len(audited)),
 			Value:   finding.Num(float64(len(names))), Unit: "tables",
+		})
+	}
+	return out
+}
+
+// maxDriftedListed bounds the per-table findings. A node that missed a whole
+// schema drifts on every table in it, and four hundred findings bury the rest
+// of the report — at which point the number is the finding.
+const maxDriftedListed = 5
+
+// schemaDrift compares the application schemas across nodes (GD-13).
+//
+// Galera *does* replicate application DDL, which is what makes this a
+// different diagnosis from sysTableDrift rather than the same check pointed at
+// another schema: a difference here means a change that failed, was applied on
+// one node by hand, or landed while a node was desynced — and the fix is to
+// re-apply it, not to run mysql_upgrade. Both are equally invisible to every
+// wsrep_* counter, because replication is not broken. It already carried
+// whatever it was given.
+func schemaDrift(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	var audited []cluster.Snapshot
+	for _, s := range live {
+		// nil is "not read"; an empty map is "read, and there are none".
+		if s.AppTables == nil {
+			out = append(out, finding.Finding{
+				Check: "schema/drift", Target: s.Node, Status: finding.WARN,
+				Message: "application schema definitions were not read",
+				Hint:    "the audit user needs SELECT on information_schema.COLUMNS; without it this node is excluded from the drift comparison",
+			})
+			continue
+		}
+		audited = append(audited, s)
+	}
+	if len(audited) < 2 {
+		return out
+	}
+
+	tables := map[string]bool{}
+	for _, s := range audited {
+		for t := range s.AppTables {
+			tables[t] = true
+		}
+	}
+	names := make([]string, 0, len(tables))
+	for t := range tables {
+		names = append(names, t)
+	}
+	sort.Strings(names)
+
+	type drift struct {
+		table  string
+		groups map[string][]string
+	}
+	var drifted []drift
+	for _, table := range names {
+		groups := map[string][]string{}
+		for _, s := range audited {
+			fp, ok := s.AppTables[table]
+			if !ok {
+				fp = "absent"
+			}
+			groups[fp] = append(groups[fp], s.Node)
+		}
+		if len(groups) > 1 {
+			drifted = append(drifted, drift{table: table, groups: groups})
+		}
+	}
+
+	const hint = "application DDL is replicated, so this is a change that did not finish: compare the definitions and re-apply it on the nodes that are behind (a failed ALTER, a change applied by hand, or one that landed while a node was desynced)"
+
+	switch {
+	case len(drifted) == 0:
+		out = append(out, finding.Finding{
+			Check: "schema/drift", Target: name, Status: finding.OK,
+			Message: fmt.Sprintf("%d application table(s) identical across %d node(s)", len(names), len(audited)),
+			Value:   finding.Num(float64(len(names))), Unit: "tables",
+		})
+	case len(drifted) <= maxDriftedListed:
+		for _, d := range drifted {
+			out = append(out, finding.Finding{
+				Check: "schema/drift", Target: d.table, Status: finding.BAD,
+				Message: "definition differs across nodes: " + describeGroups(d.groups),
+				Hint:    hint,
+			})
+		}
+	default:
+		listed := make([]string, 0, maxDriftedListed)
+		for _, d := range drifted[:maxDriftedListed] {
+			listed = append(listed, d.table)
+		}
+		out = append(out, finding.Finding{
+			Check: "schema/drift", Target: name, Status: finding.BAD,
+			Message: fmt.Sprintf("%d application table(s) differ across nodes: %s and %d more",
+				len(drifted), strings.Join(listed, ", "), len(drifted)-maxDriftedListed),
+			Value: finding.Num(float64(len(drifted))), Unit: "tables",
+			Hint: "this many tables at once is a node that missed a whole schema change, not one bad ALTER: " + hint,
 		})
 	}
 	return out

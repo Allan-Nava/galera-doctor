@@ -26,6 +26,7 @@ These are the states this tool exists for:
 | What is wrong | Why no `wsrep_*` metric shows it |
 |---|---|
 | **A system table's definition differs between nodes** | Galera does not replicate maintenance on the server's own `mysql.*` tables. Two nodes can disagree about `mysql.column_stats` for months while every replication counter stays green — until one node's query plans, or its error log, go strange. |
+| **A schema change that did not finish** | Galera replicates application DDL, so the counters stay green: they carried what they were given. One node with a failed `ALTER`, or one that was desynced while the change went through, holds a different definition of an application table — and the application finds out. |
 | **One name, two clusters** | Each half reports a consistent size and a Primary status. The divergence is only visible by comparing the `wsrep_cluster_state_uuid` of every node *to each other*. |
 | **The proxy and the cluster disagree** | ProxySQL says ONLINE, the node says Joined. Each dashboard is fine. Traffic is going to a node that is not synced. |
 | **The gcache is too small for the write rate** | 512 MB is either forty minutes or ninety seconds. Nobody finds out until a node restarts and needs a full SST, taking a donor out of service with it. |
@@ -76,6 +77,7 @@ flow/paused                                share of the interval spent flow-cont
 repl/cert-failures                         write conflicts as a share of writesets (needs --state)
 queue/recv, queue/send                     instantaneous queue depths
 systables/drift                            definitions of the mysql.* tables differing between nodes
+schema/drift                               application table definitions differing between nodes
 schema/no-pk                               tables Galera cannot certify reliably
 cluster/versions                           mixed server or wsrep provider versions
 gcache/window                              how much time the gcache buys before a restart needs a full SST (needs --state)

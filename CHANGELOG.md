@@ -6,6 +6,29 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.2.0] - 2026-09-02
+
+### Added
+
+- **`schema/drift`** (GD-13) — the application base tables are fingerprinted
+  per node, keyed `schema.table`, and compared. Galera *does* replicate this
+  DDL, which makes it a different diagnosis from `systables/drift` rather than
+  the same check on another schema: a difference is a change that did not
+  finish — a failed `ALTER`, one applied on a single node by hand, one that
+  landed while a node was desynced — and the fix is to re-apply it, not to run
+  `mysql_upgrade`. The counters stay green throughout, because replication
+  carried what it was given.
+
+  A node whose grants do not reach `information_schema` is reported as **not
+  audited**, never dropped from the comparison; a cluster with no application
+  tables at all is quiet, because "there are none" and "they could not be read"
+  are different findings (nil versus empty map in the snapshot). Past five
+  drifted tables the finding becomes one line with the count — a node that
+  missed a whole schema change drifts on every table at once, and four hundred
+  findings would bury the report. Views are excluded: their columns are derived
+  from tables already being compared. `--no-schema` skips this read together
+  with the primary key one.
+
 ## [0.1.1] - 2026-09-02
 
 ### Added

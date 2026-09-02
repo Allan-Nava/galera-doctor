@@ -40,6 +40,27 @@ func TestCollectAgainstARealServer(t *testing.T) {
 			t.Fatalf("neither mysql.user nor mysql.global_priv was fingerprinted: %d tables", len(snap.SysTables))
 		}
 	}
+	// GD-13: the application fingerprints. A nil map here would mean "the
+	// schemas were not read", which the audit reports as a node it could not
+	// compare — so the difference between nil and empty is load-bearing, and
+	// only a real server can show which one the query produces.
+	if snap.AppTables == nil {
+		t.Fatal("AppTables is nil after a successful read: nil means \"not audited\" to the audit")
+	}
+	// A table without a primary key is an application base table, so the two
+	// reads have to agree: one returning rows while the other is empty means
+	// the join in appTableFingerprints excluded something it should not.
+	if len(snap.TablesNoPK) > 0 && len(snap.AppTables) == 0 {
+		t.Fatalf("%d table(s) without a primary key but no application fingerprints at all", len(snap.TablesNoPK))
+	}
+	for table := range snap.AppTables {
+		for _, schema := range SystemSchemas {
+			if len(table) > len(schema) && table[:len(schema)+1] == schema+"." {
+				t.Fatalf("system schema %q leaked into the application fingerprints: %s", schema, table)
+			}
+		}
+	}
+
 	// The primary key query must not report the server's own tables.
 	for _, table := range snap.TablesNoPK {
 		for _, schema := range SystemSchemas {
@@ -48,6 +69,6 @@ func TestCollectAgainstARealServer(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("read %d status, %d variables, %d system tables, %d tables without a primary key",
-		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.TablesNoPK))
+	t.Logf("read %d status, %d variables, %d system tables, %d application tables, %d tables without a primary key",
+		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.AppTables), len(snap.TablesNoPK))
 }

@@ -79,11 +79,11 @@ touching this file, or CI will fail.
 
 ## M2 — Deeper into the cluster <!-- ms: target=v0.2.0 phase=now -->
 
-- [ ] **GD-13 — Application schema drift**: the same fingerprint comparison for
+- [x] **GD-13 — Application schema drift**: the same fingerprint comparison for
   the application schemas. Galera *does* replicate that DDL, so a difference
   means a failed or half-applied schema change — a different diagnosis from
   GD-2 and worth its own check.
-  <!-- gd: prio=high size=M labels=check -->
+  <!-- gd: prio=high size=M labels=check ver=0.2.0 -->
 - [ ] **GD-14 — Backup freshness**: a dump on disk is not a backup that left the
   building. Check the age of the local dump *and* whether it reached its
   off-site destination, because the first without the second is the failure

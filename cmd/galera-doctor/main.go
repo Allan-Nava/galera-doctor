@@ -69,7 +69,7 @@ flags:
   --expect-nodes N         membership the cluster should report (default: nodes given)
   --timeout D              per-node timeout (default 10s)
   --no-systables           skip the system table drift comparison
-  --no-schema              skip the primary key check
+  --no-schema              skip the application schema reads (drift, primary keys)
   --flow-warn F            flow-control share of the interval to WARN at (default 0.01)
   --flow-bad F             ... and to call BAD (default 0.10)
   --ist-warn D             gcache window below which a restart means a full SST (default 30m)
@@ -102,6 +102,7 @@ func cmdChecks() int {
 		{"repl/cert-failures", "write conflicts as a share of writesets (needs --state)"},
 		{"queue/recv, queue/send", "instantaneous queue depths"},
 		{"systables/drift", "definitions of the mysql.* tables differing between nodes"},
+		{"schema/drift", "application table definitions differing between nodes: a schema change that did not finish"},
 		{"schema/no-pk", "tables Galera cannot certify reliably"},
 		{"cluster/versions", "mixed server or wsrep provider versions"},
 		{"gcache/window", "how much time the gcache buys before a restart needs a full SST (needs --state)"},
@@ -143,7 +144,7 @@ func cmdAudit(args []string) int {
 		expect      = fs.Int("expect-nodes", 0, "membership the cluster should report")
 		timeout     = fs.Duration("timeout", 10*time.Second, "per-node timeout")
 		noSysTables = fs.Bool("no-systables", false, "skip the system table drift comparison")
-		noSchema    = fs.Bool("no-schema", false, "skip the primary key check")
+		noSchema    = fs.Bool("no-schema", false, "skip the application schema reads (drift, primary keys)")
 		flowWarn    = fs.Float64("flow-warn", 0.01, "flow-control share to WARN at")
 		flowBad     = fs.Float64("flow-bad", 0.10, "flow-control share to call BAD")
 		istWarn     = fs.Duration("ist-warn", 30*time.Minute, "gcache window below which a restart means a full SST")

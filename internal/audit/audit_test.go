@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,9 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			"wsrep_provider_options": "gcache.size = 512M; gcs.fc_limit = 16;",
 		},
 		SysTables: map[string]string{"user": "aaaaaaaaaaaaaaaa", "column_stats": "bbbbbbbbbbbbbbbb"},
+		// A non-nil map is "the application schemas were read"; nil is "they
+		// were not", which is a different finding from "there are none".
+		AppTables: map[string]string{"app.users": "1111111111111111", "app.events": "2222222222222222"},
 	}
 }
 
@@ -397,5 +401,146 @@ func TestARealMemberWithWsrepOffIsStillGraded(t *testing.T) {
 	}
 	if got := byCheck(t, rep, "node/wsrep-on"); len(got) != 1 || got[0].Status != finding.BAD {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+// GD-13 — application schema drift.
+//
+// Galera *does* replicate application DDL, which is what makes a difference
+// here a different diagnosis from systables/drift: it is not maintenance that
+// was never replicated, it is a schema change that failed or was applied on
+// one node by hand. Both are invisible to every wsrep_* counter.
+func TestApplicationSchemaDriftIsFoundAndAttributed(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].AppTables["app.users"] = "9999999999999999"
+	rep := Run(snaps, nil, opts())
+
+	var drift *finding.Finding
+	for i, f := range rep.Findings {
+		if f.Check == "schema/drift" && f.Target == "app.users" {
+			drift = &rep.Findings[i]
+		}
+	}
+	if drift == nil {
+		t.Fatalf("no application drift finding: %+v", rep.Findings)
+	}
+	if drift.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD", drift.Status)
+	}
+	if !strings.Contains(drift.Message, "ov-03") {
+		t.Fatalf("the drifted node must be named: %q", drift.Message)
+	}
+	// The hint has to distinguish this from systables/drift, or the operator
+	// reaches for mysql_upgrade on a half-applied ALTER.
+	if !strings.Contains(drift.Hint, "replicated") {
+		t.Fatalf("the hint must say the DDL should have replicated and did not: %q", drift.Hint)
+	}
+}
+
+func TestAnApplicationTableMissingOnOneNodeIsDrift(t *testing.T) {
+	snaps := threeHealthy()
+	delete(snaps[1].AppTables, "app.events")
+	rep := Run(snaps, nil, opts())
+
+	var f *finding.Finding
+	for i := range rep.Findings {
+		if rep.Findings[i].Check == "schema/drift" && rep.Findings[i].Target == "app.events" {
+			f = &rep.Findings[i]
+		}
+	}
+	if f == nil || f.Status != finding.BAD {
+		t.Fatalf("a table missing on one node is drift: %+v", rep.Findings)
+	}
+	if !strings.Contains(f.Message, "absent") || !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the message must say the table is absent, and where: %q", f.Message)
+	}
+}
+
+// A node whose grants do not reach information_schema is reported as not
+// audited — never dropped from the comparison quietly.
+func TestUnreadApplicationSchemaIsReportedAsNotAudited(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].AppTables = nil
+	snaps[2].AppTables["app.users"] = "9999999999999999"
+	rep := Run(snaps, nil, opts())
+
+	var notAudited, drift bool
+	for _, f := range rep.Findings {
+		if f.Check != "schema/drift" {
+			continue
+		}
+		if f.Target == "sg-01" && f.Status == finding.WARN {
+			notAudited = true
+		}
+		if f.Target == "app.users" && f.Status == finding.BAD {
+			drift = true
+		}
+	}
+	if !notAudited {
+		t.Fatalf("a node that could not be read must be reported: %+v", rep.Findings)
+	}
+	if !drift {
+		t.Fatalf("the two nodes that were read must still be compared: %+v", rep.Findings)
+	}
+}
+
+// A cluster with no application tables at all is not a cluster whose schema
+// could not be read: a fresh cluster is quiet, not a warning.
+func TestNoApplicationTablesIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].AppTables = map[string]string{}
+	}
+	rep := Run(snaps, nil, opts())
+	if rep.Worst() != finding.OK {
+		t.Fatalf("an empty schema must stay quiet, got %s: %+v", rep.Worst(), rep.Findings)
+	}
+}
+
+// A node that missed a whole schema drifts on every table in it. One finding
+// per table would bury the rest of the report — and the number is the point,
+// not the list.
+func TestManyDriftedTablesAreSummarised(t *testing.T) {
+	snaps := threeHealthy()
+	for i := 0; i < 40; i++ {
+		table := fmt.Sprintf("app.t%02d", i)
+		for n := range snaps {
+			snaps[n].AppTables[table] = "1111111111111111"
+		}
+		snaps[2].AppTables[table] = "9999999999999999"
+	}
+	rep := Run(snaps, nil, opts())
+
+	fs := byCheck(t, rep, "schema/drift")
+	if len(fs) > 6 {
+		t.Fatalf("40 drifted tables produced %d findings; the report has to stay readable", len(fs))
+	}
+	var summary *finding.Finding
+	for i := range fs {
+		if fs[i].Value != nil && *fs[i].Value == 40 {
+			summary = &fs[i]
+		}
+	}
+	if summary == nil {
+		t.Fatalf("no finding carries the count of drifted tables: %+v", fs)
+	}
+	if summary.Status != finding.BAD {
+		t.Fatalf("the summary status = %s, want BAD", summary.Status)
+	}
+}
+
+// A healthy cluster's schema check says what it compared, so "quiet" is
+// distinguishable from "did not look".
+func TestIdenticalSchemasReportWhatWasCompared(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	f := one(t, rep, "schema/drift")
+	if f.Status != finding.OK {
+		t.Fatalf("status = %s, want OK", f.Status)
+	}
+	if f.Value == nil || *f.Value != 2 {
+		t.Fatalf("two application tables were compared, got %v: %q", f.Value, f.Message)
+	}
+	if !strings.Contains(f.Message, "3 node(s)") {
+		t.Fatalf("the message must say how many nodes were compared: %q", f.Message)
 	}
 }

@@ -48,6 +48,32 @@ per node, or one node's error log filling up.
 A node without `SELECT` on `information_schema` is reported as **not audited**
 rather than silently left out of the comparison.
 
+### `schema/drift`
+
+The same fingerprint comparison over the **application** base tables, keyed
+`schema.table`.
+
+Galera *does* replicate this DDL, and that is what makes it a different
+diagnosis rather than the same check pointed at another schema: a difference
+here is a schema change that did not finish — a failed `ALTER`, one applied on
+a single node by hand, or one that landed while a node was desynced. The
+counters stay green because replication is not broken; it carried what it was
+given.
+
+The fix is per node too, but it is *re-apply the change*, not `mysql_upgrade`.
+
+A node that missed a whole schema change drifts on every table at once, so past
+five tables the finding becomes one line with the count — four hundred findings
+would bury the rest of the report. Views are excluded: their columns are
+derived from tables that are already being compared. A node without `SELECT` on
+`information_schema` is **not audited** rather than dropped from the
+comparison, and a cluster with no application tables at all is quiet — "there
+are none" and "they could not be read" are different findings.
+
+`--no-schema` skips this read and the primary key one with it: on an instance
+with tens of thousands of tables they are the only part of the audit that costs
+more than microseconds.
+
 ### `schema/no-pk`
 
 Application tables without a primary key, as a union across nodes. Galera's

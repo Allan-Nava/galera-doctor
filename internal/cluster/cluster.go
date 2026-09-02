@@ -42,6 +42,16 @@ type Snapshot struct {
 	// the way it replicates application DDL, so a drift here is invisible to
 	// every wsrep_* counter — which is exactly why it is collected.
 	SysTables map[string]string `json:"sys_tables,omitempty"`
+	// AppTables maps an application table — schema-qualified — to a
+	// fingerprint of its column definitions. Galera *does* replicate
+	// application DDL, so a difference here is not maintenance that never
+	// travelled (that is SysTables) but a schema change that failed, was
+	// applied by hand on one node, or landed while a node was desynced.
+	//
+	// A nil map means the schemas were not read; an empty non-nil map means
+	// they were read and there are none. "No application tables" and "no
+	// grants on information_schema" are different findings.
+	AppTables map[string]string `json:"app_tables,omitempty"`
 	// TablesNoPK lists application tables without a primary key. Galera's
 	// row-based certification needs one.
 	TablesNoPK []string `json:"tables_no_pk,omitempty"`

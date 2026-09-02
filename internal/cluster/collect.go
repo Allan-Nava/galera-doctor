@@ -102,6 +102,13 @@ func (c Collector) Collect(ctx context.Context, n Node) Snapshot {
 		}
 	}
 	if !c.SkipSchema {
+		// AppTables stays nil when the read fails: the audit reports a node it
+		// could not compare, which is not the same statement as "this node has
+		// no application tables".
+		if snap.AppTables, err = appTableFingerprints(ctx, db); err != nil {
+			snap.AppTables = nil
+			_ = err
+		}
 		if snap.TablesNoPK, err = tablesWithoutPK(ctx, db); err != nil {
 			snap.TablesNoPK = nil
 			_ = err
@@ -185,6 +192,61 @@ func sysTableFingerprints(ctx context.Context, db *sql.DB) (map[string]string, e
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	out := make(map[string]string, len(perTable))
+	for table, defs := range perTable {
+		out[table] = Fingerprint(defs)
+	}
+	return out, nil
+}
+
+// appTableFingerprints hashes the column definitions of every application base
+// table, keyed schema.table (GD-13).
+//
+// Galera does replicate this DDL, so a difference between nodes is not the
+// invisible-maintenance story of sysTableFingerprints: it is a schema change
+// that did not finish. The counters stay green either way, because replication
+// did carry what it was given.
+//
+// Views are excluded on purpose — information_schema.COLUMNS happily expands
+// them, and a view's columns are derived from tables that are already being
+// compared.
+func appTableFingerprints(ctx context.Context, db *sql.DB) (map[string]string, error) {
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(SystemSchemas)), ",")
+	args := make([]any, 0, len(SystemSchemas))
+	for _, s := range SystemSchemas {
+		args = append(args, s)
+	}
+	rows, err := Query(ctx, db, `
+		SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.ORDINAL_POSITION,
+		       c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_KEY,
+		       IFNULL(c.COLUMN_DEFAULT, '~none~')
+		  FROM information_schema.COLUMNS c
+		  JOIN information_schema.TABLES t
+		    ON t.TABLE_SCHEMA = c.TABLE_SCHEMA
+		   AND t.TABLE_NAME = c.TABLE_NAME
+		 WHERE t.TABLE_TYPE = 'BASE TABLE'
+		   AND c.TABLE_SCHEMA NOT IN (`+placeholders+`)
+		 ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	perTable := map[string][]string{}
+	for rows.Next() {
+		var schema, table, column, colType, nullable, key, def string
+		var ordinal int
+		if err := rows.Scan(&schema, &table, &column, &ordinal, &colType, &nullable, &key, &def); err != nil {
+			return nil, err
+		}
+		name := schema + "." + table
+		perTable[name] = append(perTable[name], ColumnRow(column, ordinal, colType, nullable, key, def))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Non-nil even when the server has no application tables at all: the audit
+	// reads nil as "not audited".
 	out := make(map[string]string, len(perTable))
 	for table, defs := range perTable {
 		out[table] = Fingerprint(defs)
