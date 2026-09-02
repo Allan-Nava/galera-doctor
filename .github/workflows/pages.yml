@@ -27,9 +27,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # assets/ is the source of truth for the logo; site/ only carries a copy.
+      # assets/ is the source of truth for the logo; site/ only carries a copy,
+      # and CI already fails when the two have drifted. Syncing here means a
+      # deploy is never the stale one.
       - name: Sync the logo into the site
-        run: cp assets/mark.svg assets/logo.svg assets/logo-dark.svg site/
+        run: ./scripts/site.sh sync
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

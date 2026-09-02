@@ -15,6 +15,13 @@ reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
   charter for what the tool is for and what it will never become, and a
   dependency-free landing page in `site/` published to GitHub Pages by its own
   workflow.
+- **The project's own metadata is generated and gated** (GD-24) — the GitHub
+  description, website and topics are in
+  [.github/repo.env](.github/repo.env) and written by `scripts/repo.sh apply`;
+  `scripts/links.sh` fails on a local link the docs or the site point at
+  something that is not in the tree; `scripts/site.sh` keeps the page's logo a
+  copy of `assets/`. All three run in CI, so a change to how the project
+  describes itself arrives in a diff.
 
 ## [0.1.0] - 2026-09-02
 

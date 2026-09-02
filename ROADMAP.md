@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**23 items · 13 shipped · 10 open · 3 milestones.**
+**24 items · 14 shipped · 10 open · 3 milestones.**
 
 ## At a glance
 
@@ -14,7 +14,7 @@
 |---|---|---|---|---|---|
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
 | **M2** — Deeper into the cluster | `v0.2.0` | **now** | `..........` 0% | 6 | 0 |
-| **M3** — Fit the toolchain | `v0.3.0` | next | `##........` 20% | 4 | 1 |
+| **M3** — Fit the toolchain | `v0.3.0` | next | `###.......` 33% | 4 | 2 |
 
 ## Next up
 
@@ -65,7 +65,7 @@ Target `v0.2.0` · **now** · 6 open · 0 shipped · `..........` 0%
 
 ### M3 — Fit the toolchain
 
-Target `v0.3.0` · next · 4 open · 1 shipped · `##........` 20%
+Target `v0.3.0` · next · 4 open · 2 shipped · `###.......` 33%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
@@ -74,6 +74,7 @@ Target `v0.3.0` · next · 4 open · 1 shipped · `##........` 20%
 | **GD-21** — Docs site | med | M | docs | open |
 | **GD-22** — Percona XtraDB Cluster and MySQL Group Replication | low | XL | check | open |
 | **GD-23** — Identity and landing page | med | S | docs,project | shipped `0.1.1` |
+| **GD-24** — The project's own metadata is generated too | med | S | project,docs | shipped `0.1.1` |
 
 ## By label
 
@@ -81,11 +82,11 @@ Target `v0.3.0` · next · 4 open · 1 shipped · `##........` 20%
 |---|---|---|
 | `check` | 13 | 6 |
 | `cli` | 2 | 1 |
-| `docs` | 2 | 1 |
+| `docs` | 3 | 1 |
 | `integration` | 1 | 1 |
 | `release` | 1 | 1 |
 | `collect` | 1 | 0 |
 | `output` | 1 | 0 |
-| `project` | 1 | 0 |
+| `project` | 2 | 0 |
 | `proxysql` | 1 | 0 |
 | `tests` | 1 | 0 |

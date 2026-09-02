@@ -106,6 +106,29 @@ jobs:
       - name: The issue planner
         run: sh scripts/backlog_issues_test.sh
 
+  # The docs and the site link into this tree; a moved file is a broken link on
+  # a page nobody rebuilt. The About box lives in .github/repo.env for the same
+  # reason: so a change to it arrives in a diff.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every local link resolves
+        run: ./scripts/links.sh
+
+      # assets/ is the source of truth for the logo and site/ carries a copy so
+      # the page needs no build step. A copy that drifts is a wrong logo.
+      - name: The site carries the current logo
+        run: ./scripts/site.sh check
+
+      # A fork's About box is its own business.
+      - name: The About box matches .github/repo.env
+        if: github.repository == 'Allan-Nava/galera-doctor'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/repo.sh check
+
   actions:
     runs-on: ubuntu-latest
     steps:

@@ -110,3 +110,16 @@ this file wins and CLAUDE.md gets fixed.
   error much later.
 - **A DSN contains `=` in its parameters**, so `--node name=DSN` splits on the
   *first* one only.
+- **Everything around the code has a CI gate, and the gate is the point.**
+  `ROADMAP.md` is generated from `BACKLOG.md`, the About box is generated from
+  `.github/repo.env` (`scripts/repo.sh`), `site/`'s logo is a copy of `assets/`
+  (`scripts/site.sh`) and every local link is checked (`scripts/links.sh`). Add
+  a generated artefact only together with the check that it is current —
+  otherwise it is a file that is wrong and nobody notices.
+- **The About box is a diff, not a browser.** Description, website and topics
+  are in `.github/repo.env`; `scripts/repo.sh apply` needs admin and is run by
+  hand, `scripts/repo.sh check` runs in CI. GitHub's own `GITHUB_TOKEN` cannot
+  write repository settings, which is why the apply is not a workflow.
+- **The landing page has no build step.** `site/index.html` is hand-written and
+  self-contained — no generator, no theme, no dependency to keep current — and
+  `.github/workflows/pages.yml` uploads the directory as it stands.

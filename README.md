@@ -207,6 +207,20 @@ GD_TEST_DSN='root:testpw@tcp(127.0.0.1:13306)/' go test ./internal/cluster/ -run
 will never become: [INTENT.md](INTENT.md). Contributor brief:
 [AGENTS.md](AGENTS.md).
 
+Everything around the code is a POSIX-sh script with a CI gate behind it, so a
+stale generated file fails the build instead of rotting:
+
+```sh
+scripts/backlog.sh roadmap   # regenerate ROADMAP.md from BACKLOG.md
+scripts/links.sh             # every local link in the docs and the site resolves
+scripts/site.sh serve        # the landing page in site/, on localhost:8000
+scripts/repo.sh apply        # write .github/repo.env to the GitHub About box
+```
+
+The repository's description, website and topics live in
+[.github/repo.env](.github/repo.env) rather than in a text field somebody typed
+once: `scripts/repo.sh apply` writes them and CI fails when the two drift.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

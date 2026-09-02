@@ -121,3 +121,9 @@ touching this file, or CI will fail.
   as the charter (why the tool exists, what it will never become) and a
   dependency-free GitHub Pages landing page in `site/`, deployed by its own
   workflow. <!-- gd: prio=med size=S labels=docs,project ver=0.1.1 -->
+- [x] **GD-24 — The project's own metadata is generated too**: the GitHub
+  description, website and topics live in `.github/repo.env` and are written by
+  `scripts/repo.sh`; `scripts/links.sh` checks every local link in the docs and
+  the site; `scripts/site.sh` keeps the page's logo a copy of `assets/`. Each
+  has a CI gate, so drift fails the build rather than sitting on the repository
+  front page. <!-- gd: prio=med size=S labels=project,docs ver=0.1.1 -->
