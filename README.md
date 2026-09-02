@@ -30,6 +30,9 @@ These are the states this tool exists for:
 | **One name, two clusters** | Each half reports a consistent size and a Primary status. The divergence is only visible by comparing the `wsrep_cluster_state_uuid` of every node *to each other*. |
 | **The proxy and the cluster disagree** | ProxySQL says ONLINE, the node says Joined. Each dashboard is fine. Traffic is going to a node that is not synced. |
 | **The gcache is too small for the write rate** | 512 MB is either forty minutes or ninety seconds. Nobody finds out until a node restarts and needs a full SST, taking a donor out of service with it. |
+| **The next restart cannot rejoin** | `wsrep_sst_donor` naming a server that was decommissioned in March, or an SST method the donors cannot serve. Everything is Synced and green until the node restarts, and then it either refuses to start or takes an unexpected donor out of service. |
+| **A split brain that is already configured** | `pc.ignore_sb` left on after somebody recovered a cluster by hand, or quorum weights that are not one vote per node. Nothing is exercised until the network moves — and then both sides stay writable. |
+| **Tables Galera does not replicate at all** | A MyISAM or Aria table in an application schema. The write succeeds, nothing certifies it, no counter records it, and the rows exist on exactly one node. |
 | **Flow control that already happened** | `wsrep_flow_control_paused` covers the time since the last status reset, so an incident from March reads the same today. Graded as a lifetime total it goes red once and stays red. |
 
 ## What a run looks like
@@ -79,6 +82,12 @@ queue/recv, queue/send                     instantaneous queue depths
 systables/drift                            definitions of the mysql.* tables differing between nodes
 schema/drift                               application table definitions differing between nodes
 schema/no-pk                               tables Galera cannot certify reliably
+schema/engine                              application tables on an engine Galera does not replicate
+sst/method, sst/donor, sst/auth            whether the next node to restart can rejoin
+quorum/ignore-sb, quorum/bootstrap         settings that decide the next partition
+quorum/weight                              the quorum arithmetic, when it is not one vote per node
+repl/sync-wait                             nodes disagreeing about causal reads
+repl/auto-increment                        ids that collide once a second node takes writes
 cluster/versions                           mixed server or wsrep provider versions
 gcache/window                              how much time the gcache buys before a restart needs a full SST (needs --state)
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)

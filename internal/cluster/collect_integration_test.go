@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,6 +62,20 @@ func TestCollectAgainstARealServer(t *testing.T) {
 		}
 	}
 
+	// GD-29: the engine query. A MyISAM table in an application schema has to
+	// come back, and an InnoDB one must not — a filter that is inverted, or an
+	// ENGINE spelling that does not match, is invisible from a fixture.
+	for _, table := range snap.TablesNonInnoDB {
+		if strings.Contains(table, "(InnoDB)") {
+			t.Fatalf("an InnoDB table was reported as not replicated: %s", table)
+		}
+		for _, schema := range SystemSchemas {
+			if strings.HasPrefix(table, schema+".") {
+				t.Fatalf("system schema %q leaked into the engine list: %s", schema, table)
+			}
+		}
+	}
+
 	// The primary key query must not report the server's own tables.
 	for _, table := range snap.TablesNoPK {
 		for _, schema := range SystemSchemas {
@@ -69,6 +84,6 @@ func TestCollectAgainstARealServer(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("read %d status, %d variables, %d system tables, %d application tables, %d tables without a primary key",
-		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.AppTables), len(snap.TablesNoPK))
+	t.Logf("read %d status, %d variables, %d system tables, %d application tables, %d without a primary key, %d not on a replicated engine",
+		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.AppTables), len(snap.TablesNoPK), len(snap.TablesNonInnoDB))
 }

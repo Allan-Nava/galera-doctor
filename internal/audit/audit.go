@@ -16,6 +16,7 @@ package audit
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,6 +124,11 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(queues(live, opt)...)
 	add(sysTableDrift(rep.Cluster, live)...)
 	add(schemaDrift(rep.Cluster, live)...)
+	add(sstReadiness(rep.Cluster, live)...)
+	add(quorumSettings(rep.Cluster, live)...)
+	add(syncWait(rep.Cluster, live)...)
+	add(autoIncrement(rep.Cluster, live)...)
+	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
 	add(versions(rep.Cluster, live)...)
 	add(gcache(live, prev, rep.State, opt)...)
@@ -612,6 +618,437 @@ func schemaDrift(name string, live []cluster.Snapshot) []finding.Finding {
 		})
 	}
 	return out
+}
+
+// backupSSTMethods are the state transfer methods that log in to the donor.
+// rsync and its variants copy files and authenticate at the filesystem level,
+// so an empty wsrep_sst_auth says nothing about them.
+var backupSSTMethods = map[string]bool{
+	"mariabackup":   true,
+	"xtrabackup":    true,
+	"xtrabackup-v2": true,
+	"mysqldump":     true,
+}
+
+// sstReadiness reports what the next rejoin will cost (GD-25).
+//
+// Nothing here is wrong with the cluster today. A node whose SST method its
+// peers cannot serve, or whose donor list names a server that was
+// decommissioned in March, is Synced and green right up to the moment it
+// restarts — at which point it either cannot rejoin or takes an unexpected
+// donor out of service. No wsrep_* counter has an opinion about a setting that
+// has not been exercised yet.
+func sstReadiness(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+
+	// The method, compared across the nodes that report it. A build that does
+	// not report it is not a build that agrees with everybody else.
+	var reporting []cluster.Snapshot
+	for _, s := range live {
+		if v, ok := s.Var("wsrep_sst_method"); ok && strings.TrimSpace(v) != "" {
+			reporting = append(reporting, s)
+		}
+	}
+	if len(reporting) > 0 {
+		groups := groupBy(reporting, func(s cluster.Snapshot) string {
+			v, _ := s.Var("wsrep_sst_method")
+			return strings.ToLower(strings.TrimSpace(v))
+		})
+		if len(groups) > 1 {
+			out = append(out, finding.Finding{
+				Check: "sst/method", Target: name, Status: finding.WARN,
+				Message: "nodes disagree about the state transfer method: " + describeGroups(groups),
+				Hint:    "the joiner asks and the donor serves: a donor without the joiner's method installed cannot answer, so the node that restarts is the one that finds out",
+			})
+		} else {
+			method, _ := reporting[0].Var("wsrep_sst_method")
+			out = append(out, finding.Finding{
+				Check: "sst/method", Target: name, Status: finding.OK,
+				Message: fmt.Sprintf("all %d node(s) use %s for state transfer",
+					len(reporting), strings.ToLower(strings.TrimSpace(method))),
+			})
+		}
+	}
+
+	// Every spelling this cluster answers to, so a donor named by address is
+	// not reported as missing.
+	known := map[string]bool{}
+	for _, s := range live {
+		for _, a := range s.Addresses() {
+			known[strings.ToLower(a)] = true
+		}
+	}
+
+	for _, s := range live {
+		list, ok := s.Var("wsrep_sst_donor")
+		if !ok || strings.TrimSpace(list) == "" {
+			continue
+		}
+		// A trailing empty element — "node," — is Galera's way of saying "and
+		// otherwise anybody". Without it the list is the only answer allowed.
+		parts := strings.Split(list, ",")
+		fallback := strings.TrimSpace(parts[len(parts)-1]) == ""
+		var unknown []string
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" || known[strings.ToLower(p)] {
+				continue
+			}
+			unknown = append(unknown, p)
+		}
+		if len(unknown) == 0 {
+			continue
+		}
+		status, hint := finding.BAD, "with no trailing comma this list is the only donor allowed: the node will refuse to start when that donor is unavailable — fix the name, or end the list with a comma to allow any donor"
+		if fallback {
+			status, hint = finding.WARN, "the trailing comma means it will fall back to any available donor, so the node still starts — but the list no longer says what somebody meant it to say"
+		}
+		out = append(out, finding.Finding{
+			Check: "sst/donor", Target: s.Node, Status: status,
+			Message: fmt.Sprintf("SST donor list names %s, which is not in this cluster (wsrep_sst_donor=%s)",
+				strings.Join(unknown, ", "), list),
+			Hint: hint,
+		})
+	}
+
+	// A backup-based transfer logs in to the donor. An empty wsrep_sst_auth is
+	// not proof the credentials are missing — they can live in the [sst]
+	// section of the config, where the server never sees them — so the finding
+	// says that rather than pretending to be sure.
+	for _, s := range live {
+		method, ok := s.Var("wsrep_sst_method")
+		if !ok || !backupSSTMethods[strings.ToLower(strings.TrimSpace(method))] {
+			continue
+		}
+		auth, ok := s.Var("wsrep_sst_auth")
+		if !ok || strings.TrimSpace(auth) != "" {
+			continue
+		}
+		out = append(out, finding.Finding{
+			Check: "sst/auth", Target: s.Node, Status: finding.WARN,
+			Message: fmt.Sprintf("wsrep_sst_auth is empty and the method is %s, which authenticates against the donor",
+				strings.ToLower(strings.TrimSpace(method))),
+			Hint: "credentials may be in the [sst] section of the config instead, which the server cannot see — confirm it there, because the alternative is an SST that fails at 03:00",
+		})
+	}
+	return out
+}
+
+// quorumSettings reports a split brain that is already configured (GD-26).
+//
+// The cluster is Primary, every counter is green, and pc.* has already decided
+// what happens at the next partition: a node left with pc.ignore_sb keeps
+// taking writes on the wrong side of it, and the weights decide which side
+// that is. None of this is exercised until the network moves, which is why no
+// metric reports it.
+func quorumSettings(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+
+	for _, s := range live {
+		if v, ok := s.ProviderOption("pc.ignore_sb"); ok && truthy(v) {
+			out = append(out, finding.Finding{
+				Check: "quorum/ignore-sb", Target: s.Node, Status: finding.BAD,
+				Message: "pc.ignore_sb is on: this node keeps accepting writes in a non-Primary component",
+				Hint:    "at the next partition both sides stay writable and diverge — this is normally left on after somebody recovered a cluster by hand, and it has to be turned off again",
+			})
+		}
+		if v, ok := s.ProviderOption("pc.bootstrap"); ok && truthy(v) {
+			out = append(out, finding.Finding{
+				Check: "quorum/bootstrap", Target: s.Node, Status: finding.WARN,
+				Message: "pc.bootstrap is still set on this node",
+				Hint:    "the bootstrap trigger is a one-shot: left in the configuration it makes this node form its own Primary component the next time it starts alone",
+			})
+		}
+	}
+
+	// The weights, as arithmetic rather than as an opinion: unequal weights are
+	// legal and sometimes deliberate, and the useful statement is what the sum
+	// makes possible.
+	weights := map[string]float64{}
+	total := 0.0
+	for _, s := range live {
+		v, ok := s.ProviderOption("pc.weight")
+		if !ok {
+			continue
+		}
+		w, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			continue
+		}
+		weights[s.Node] = w
+		total += w
+		if w == 0 {
+			out = append(out, finding.Finding{
+				Check: "quorum/weight", Target: s.Node, Status: finding.BAD,
+				Message: "pc.weight is 0: this node never counts towards quorum",
+				Value:   finding.Num(0), Unit: "weight",
+				Hint: "the cluster has one fewer vote than it has nodes — losing one of the others is losing quorum, and the node count says nothing about it",
+			})
+		}
+	}
+	if len(weights) > 1 {
+		equal := true
+		var first float64
+		i := 0
+		for _, w := range weights {
+			if i == 0 {
+				first = w
+			} else if w != first {
+				equal = false
+			}
+			i++
+		}
+		switch {
+		case equal && first > 0:
+			out = append(out, finding.Finding{
+				Check: "quorum/weight", Target: name, Status: finding.OK,
+				Message: fmt.Sprintf("all %d node(s) carry equal quorum weight (%s)", len(weights), trimFloat(first)),
+				Value:   finding.Num(total), Unit: "weight",
+			})
+		case !equal:
+			nodes := make([]string, 0, len(weights))
+			for n := range weights {
+				nodes = append(nodes, n)
+			}
+			sort.Strings(nodes)
+			parts := make([]string, 0, len(nodes))
+			var majority []string
+			for _, n := range nodes {
+				parts = append(parts, fmt.Sprintf("%s=%s", n, trimFloat(weights[n])))
+				if weights[n]*2 > total {
+					majority = append(majority, n)
+				}
+			}
+			msg := fmt.Sprintf("quorum weights are not equal: %s of %s total",
+				strings.Join(parts, ", "), trimFloat(total))
+			hint := "the node count is not the vote count: check that this is the arithmetic somebody meant, because it decides which side of a partition survives"
+			if len(majority) > 0 {
+				msg += fmt.Sprintf(" — %s alone holds a majority", strings.Join(majority, ", "))
+				hint = "a single node holding a majority is a cluster that survives losing everything else, and dies when it loses that one: deliberate for a two-node-plus-arbitrator setup, an accident otherwise"
+			}
+			out = append(out, finding.Finding{
+				Check: "quorum/weight", Target: name, Status: finding.WARN,
+				Message: msg, Value: finding.Num(total), Unit: "weight",
+				Hint: hint,
+			})
+		}
+	}
+	return out
+}
+
+// syncWait reports nodes that disagree about causal reads (GD-27).
+//
+// With wsrep_sync_wait on, a read waits for the writes that were committed
+// before it; with it off, the same query can return a row that is not there
+// yet. When the nodes disagree, the answer depends on which node the proxy
+// picked — and every node is behaving exactly as configured, so nothing
+// reports a problem. What the cluster wants is not this tool's business; the
+// nodes not agreeing is.
+func syncWait(name string, live []cluster.Snapshot) []finding.Finding {
+	var reporting []cluster.Snapshot
+	for _, s := range live {
+		if v, ok := s.Var("wsrep_sync_wait"); ok && strings.TrimSpace(v) != "" {
+			reporting = append(reporting, s)
+		}
+	}
+	if len(reporting) < 2 {
+		return nil
+	}
+	groups := groupBy(reporting, func(s cluster.Snapshot) string {
+		v, _ := s.Var("wsrep_sync_wait")
+		return strings.TrimSpace(v)
+	})
+	if len(groups) == 1 {
+		return nil
+	}
+	return []finding.Finding{{
+		Check: "repl/sync-wait", Target: name, Status: finding.WARN,
+		Message: "nodes disagree about wsrep_sync_wait: " + describeGroups(groups),
+		Hint:    "a read is causal or not depending on which node the proxy picked, which reaches the application as \"sometimes the row is not there yet\" and reaches no dashboard at all",
+	}}
+}
+
+// autoIncrement reports ids that will collide (GD-28).
+//
+// Galera keeps auto_increment_increment and auto_increment_offset in step with
+// the membership itself — unless wsrep_auto_increment_control was turned off,
+// at which point the values are whatever somebody typed. Two nodes sharing an
+// offset generate the same ids as soon as both take writes, and the damage
+// lands in application data rather than in a replication counter.
+func autoIncrement(name string, live []cluster.Snapshot) []finding.Finding {
+	var uncontrolled []cluster.Snapshot
+	controlled := 0
+	for _, s := range live {
+		on, ok := s.Bool("wsrep_auto_increment_control")
+		if !ok {
+			continue
+		}
+		if on {
+			controlled++
+			continue
+		}
+		uncontrolled = append(uncontrolled, s)
+	}
+	if len(uncontrolled) == 0 {
+		if controlled == 0 {
+			return nil
+		}
+		return []finding.Finding{{
+			Check: "repl/auto-increment", Target: name, Status: finding.OK,
+			Message: fmt.Sprintf("Galera manages the auto-increment step and offset on all %d node(s)", controlled),
+		}}
+	}
+
+	offsets := map[string][]string{}
+	step := map[string]bool{}
+	var smallest float64
+	first := true
+	for _, s := range uncontrolled {
+		off, ok := s.Float("auto_increment_offset")
+		if !ok {
+			if v, k := s.Var("auto_increment_offset"); k {
+				if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+					off, ok = f, true
+				}
+			}
+		}
+		if ok {
+			offsets[trimFloat(off)] = append(offsets[trimFloat(off)], s.Node)
+		}
+		if v, k := s.Var("auto_increment_increment"); k {
+			if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+				step[trimFloat(f)] = true
+				if first || f < smallest {
+					smallest, first = f, false
+				}
+			}
+		}
+	}
+
+	var shared []string
+	for off, nodes := range offsets {
+		if len(nodes) > 1 {
+			sort.Strings(nodes)
+			shared = append(shared, fmt.Sprintf("%s (%s)", off, strings.Join(nodes, ", ")))
+		}
+	}
+	sort.Strings(shared)
+
+	const hint = "wsrep_auto_increment_control is ON by default and keeps the step and the offsets in line with the membership; with it OFF the values are whatever was typed, and the ids collide the moment a second node takes a write"
+	if len(shared) > 0 {
+		return []finding.Finding{{
+			Check: "repl/auto-increment", Target: name, Status: finding.BAD,
+			Message: fmt.Sprintf("wsrep_auto_increment_control is off and nodes share an auto_increment_offset: %s",
+				strings.Join(shared, "; ")),
+			Hint: hint,
+		}}
+	}
+	if !first && smallest < float64(len(live)) {
+		return []finding.Finding{{
+			Check: "repl/auto-increment", Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("wsrep_auto_increment_control is off and the step is %s for %d node(s): the offsets run out",
+				trimFloat(smallest), len(live)),
+			Value: finding.Num(smallest), Unit: "step",
+			Hint: hint,
+		}}
+	}
+	return []finding.Finding{{
+		Check: "repl/auto-increment", Target: name, Status: finding.OK,
+		Message: fmt.Sprintf("auto-increment is set by hand on %d node(s), with distinct offsets and a step of %s",
+			len(uncontrolled), trimFloat(smallest)),
+	}}
+}
+
+// truthy reads the spellings Galera uses inside wsrep_provider_options, which
+// are not the ON/OFF of a server variable.
+func truthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "yes", "on", "1":
+		return true
+	}
+	return false
+}
+
+// trimFloat prints a weight or an offset the way somebody typed it: 3, not
+// 3.000000.
+func trimFloat(f float64) string {
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// storageEngines reports application tables Galera does not replicate (GD-29).
+//
+// Galera replicates InnoDB. A write to a MyISAM or Aria table succeeds, is
+// certified by nothing, travels nowhere, and leaves the row on exactly one
+// node — with every replication counter green, because from replication's
+// point of view nothing happened. MariaDB can be told to replicate MyISAM and
+// Aria (wsrep_mode, or the older wsrep_replicate_myisam), which is
+// experimental and, more to the point here, per node: nodes disagreeing about
+// it is worse than none of them doing it, because then the same write lands on
+// some of them.
+func storageEngines(live []cluster.Snapshot) []finding.Finding {
+	seen := map[string]bool{}
+	for _, s := range live {
+		for _, t := range s.TablesNonInnoDB {
+			seen[t] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	tables := make([]string, 0, len(seen))
+	for t := range seen {
+		tables = append(tables, t)
+	}
+	sort.Strings(tables)
+	shown := tables
+	suffix := ""
+	if len(shown) > 5 {
+		shown, suffix = shown[:5], fmt.Sprintf(" (+%d more)", len(tables)-5)
+	}
+
+	// How each node answers "do you replicate these at all".
+	groups := groupBy(live, func(s cluster.Snapshot) string {
+		mode, hasMode := s.Var("wsrep_mode")
+		if hasMode && (containsFold(mode, "REPLICATE_MYISAM") || containsFold(mode, "REPLICATE_ARIA")) {
+			return "replicated"
+		}
+		if on, ok := s.Bool("wsrep_replicate_myisam"); ok && on {
+			return "replicated"
+		}
+		if !hasMode {
+			if _, ok := s.Var("wsrep_replicate_myisam"); !ok {
+				return "unknown"
+			}
+		}
+		return "not replicated"
+	})
+	delete(groups, "unknown")
+
+	msg := fmt.Sprintf("%d application table(s) on an engine Galera does not replicate: %s%s",
+		len(tables), strings.Join(shown, ", "), suffix)
+	if len(groups) > 1 {
+		return []finding.Finding{{
+			Check: "schema/engine", Target: "schema", Status: finding.BAD,
+			Message: msg + " — and the nodes disagree about replicating them: " + describeGroups(groups),
+			Value:   finding.Num(float64(len(tables))), Unit: "tables",
+			Hint: "the same write lands on some nodes and not others, which is divergence arriving one statement at a time: align wsrep_mode across the nodes, then move these tables to InnoDB",
+		}}
+	}
+	hint := "these writes are not replicated: they succeed, no counter records them, and the rows exist on the node that took them — move the tables to InnoDB, or accept that they are per-node data"
+	if _, replicated := groups["replicated"]; replicated {
+		hint = "MyISAM and Aria replication is enabled here, which is experimental and certifies nothing: a conflicting write is not detected, it is applied — move the tables to InnoDB"
+	}
+	return []finding.Finding{{
+		Check: "schema/engine", Target: "schema", Status: finding.WARN,
+		Message: msg,
+		Value:   finding.Num(float64(len(tables))), Unit: "tables",
+		Hint: hint,
+	}}
+}
+
+// containsFold is strings.Contains, case-insensitively.
+func containsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToUpper(haystack), strings.ToUpper(needle))
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.

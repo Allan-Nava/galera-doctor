@@ -55,6 +55,10 @@ type Snapshot struct {
 	// TablesNoPK lists application tables without a primary key. Galera's
 	// row-based certification needs one.
 	TablesNoPK []string `json:"tables_no_pk,omitempty"`
+	// TablesNonInnoDB lists application tables on a storage engine Galera does
+	// not replicate, each rendered "schema.table (ENGINE)". The writes
+	// succeed, every counter stays green, and the rows exist on one node.
+	TablesNonInnoDB []string `json:"tables_non_innodb,omitempty"`
 	// Err is set when the node could not be read. Every cluster-wide statement
 	// then rests on fewer nodes than it claims, so the audit reports it as an
 	// ERROR rather than skipping the node quietly.

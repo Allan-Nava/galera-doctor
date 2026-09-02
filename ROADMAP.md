@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**32 items · 15 shipped · 17 open · 4 milestones.**
+**32 items · 20 shipped · 12 open · 4 milestones.**
 
 ## At a glance
 
@@ -15,7 +15,7 @@
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
 | **M2** — Deeper into the cluster | `v0.2.0` | **now** | `##........` 17% | 5 | 1 |
 | **M3** — Fit the toolchain | `v0.3.0` | next | `###.......` 33% | 4 | 2 |
-| **M4** — What the next restart costs | `v0.4.0` | later | `..........` 0% | 8 | 0 |
+| **M4** — What the next restart costs | `v0.2.0` | **now** | `######....` 63% | 3 | 5 |
 
 ## Next up
 
@@ -28,7 +28,7 @@ The open items with the highest priority in the milestones that are in flight.
 - **GD-16** — Node clock skew · `med` · size `S` · check (M2, target `v0.2.0`)
 - **GD-17** — Cross-DC latency from the cluster's own numbers · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-21** — Docs site · `med` · size `M` · docs (M3, target `v0.3.0`)
-- **GD-18** — Watch mode · `low` · size `M` · cli (M2, target `v0.2.0`)
+- **GD-30** — Write-set limits that disagree · `med` · size `S` · check (M4, target `v0.2.0`)
 
 ## Milestones
 
@@ -79,24 +79,24 @@ Target `v0.3.0` · next · 4 open · 2 shipped · `###.......` 33%
 
 ### M4 — What the next restart costs
 
-Target `v0.4.0` · later · 8 open · 0 shipped · `..........` 0%
+Target `v0.2.0` · **now** · 3 open · 5 shipped · `######....` 63%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-25** — SST readiness | high | M | check | open |
-| **GD-26** — A split brain that is already configured | high | M | check | open |
-| **GD-27** — Causal reads that are not | high | S | check | open |
-| **GD-28** — Auto-increment collision on failover | high | S | check | open |
-| **GD-29** — Tables Galera does not replicate at all | high | M | check | open |
 | **GD-30** — Write-set limits that disagree | med | S | check | open |
 | **GD-31** — The segment map against the topology | med | M | check | open |
 | **GD-32** — What changed since the last run | med | M | output | open |
+| **GD-25** — SST readiness | high | M | check | shipped `0.2.0` |
+| **GD-26** — A split brain that is already configured | high | M | check | shipped `0.2.0` |
+| **GD-27** — Causal reads that are not | high | S | check | shipped `0.2.0` |
+| **GD-28** — Auto-increment collision on failover | high | S | check | shipped `0.2.0` |
+| **GD-29** — Tables Galera does not replicate at all | high | M | check | shipped `0.2.0` |
 
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 20 | 12 |
+| `check` | 20 | 7 |
 | `cli` | 2 | 1 |
 | `docs` | 3 | 1 |
 | `integration` | 1 | 1 |

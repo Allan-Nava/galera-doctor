@@ -29,6 +29,43 @@ reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
   from tables already being compared. `--no-schema` skips this read together
   with the primary key one.
 
+- **`schema/engine`** (GD-29) — application base tables on an engine Galera
+  does not replicate. The write succeeds, nothing certifies it, no counter
+  records that it went nowhere, and the rows exist on the node that took them.
+  MariaDB can be told to replicate MyISAM and Aria (`wsrep_mode`,
+  `wsrep_replicate_myisam`) and that setting is per node: when the nodes
+  disagree about it the finding is `BAD` rather than `WARN`, because then the
+  same write lands on some of them and not others.
+
+- **`sst/method`, `sst/donor`, `sst/auth`** (GD-25) — whether the next node to
+  restart can rejoin. Nodes disagreeing about `wsrep_sst_method` (the joiner
+  asks, the donor serves); a `wsrep_sst_donor` naming a server this cluster
+  does not have under any spelling it answers to — `BAD` when the list has no
+  trailing comma, because then it is the only donor allowed and the node
+  refuses to start, `WARN` when it falls back; and an empty `wsrep_sst_auth`
+  with a method that logs in to the donor, reported as a warning that names
+  the `[sst]` config section it may be hiding in rather than as a verdict.
+
+- **`quorum/ignore-sb`, `quorum/bootstrap`, `quorum/weight`** (GD-26) — a split
+  brain that is already configured. `pc.ignore_sb` left on after a manual
+  recovery keeps a node writable in a non-Primary component; `pc.bootstrap`
+  left in the configuration makes it form its own component next time it starts
+  alone; and `pc.weight` is reported as arithmetic — the sum, and whether one
+  node alone holds a majority — because unequal weights are legal and
+  sometimes deliberate. Weight 0 is `BAD`: that node never counts towards
+  quorum, so the cluster has one fewer vote than it has nodes.
+
+- **`repl/sync-wait`** (GD-27) — nodes disagreeing about `wsrep_sync_wait`. The
+  same query is causal or not depending on which node the proxy picked, which
+  reaches the application as "sometimes the row is not there yet" and reaches
+  no dashboard at all. Agreement is never a finding, whatever the value: what
+  the cluster wants is not this tool's business.
+
+- **`repl/auto-increment`** (GD-28) — ids that collide. With
+  `wsrep_auto_increment_control` off the step and offsets are whatever somebody
+  typed: two nodes sharing an `auto_increment_offset` is `BAD`, a step smaller
+  than the number of nodes is `WARN`, and Galera managing them itself is `OK`.
+
 ## [0.1.1] - 2026-09-02
 
 ### Added

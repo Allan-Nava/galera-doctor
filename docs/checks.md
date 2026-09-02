@@ -81,6 +81,70 @@ row-based certification applies these with a full-row scan on every node, and
 `DELETE`s can apply in a different order — the documentation calls it
 unsupported.
 
+### `schema/engine`
+
+Application base tables on an engine Galera does not replicate — MyISAM, Aria,
+anything that is not InnoDB.
+
+The write succeeds. Nothing certifies it, nothing replicates it, and no counter
+records that it went nowhere: the rows exist on the node that took them. This
+is the sibling of `schema/no-pk` and a worse diagnosis — that one is a table
+Galera certifies badly, this one is a table it does not certify at all.
+
+MariaDB can be told to replicate MyISAM and Aria (`wsrep_mode`, or the older
+`wsrep_replicate_myisam`). That is experimental, and it is **per node**: when
+the nodes disagree about it the finding is `BAD` rather than `WARN`, because
+then the same write lands on some of them and not others.
+
+## What the next restart costs
+
+Everything in this section is free today. It is a state the cluster has already
+decided, and the bill arrives at the next restart, failover or partition — which
+is why no `wsrep_*` counter has an opinion about any of it.
+
+### `sst/method`, `sst/donor`, `sst/auth`
+
+- **`sst/method`** — the nodes disagreeing about `wsrep_sst_method`. The joiner
+  asks and the donor serves, so a donor without the joiner's method installed
+  cannot answer.
+- **`sst/donor`** — `wsrep_sst_donor` naming a server this cluster does not
+  have, under any spelling it answers to. Whether that is fatal is decided by a
+  trailing comma: `node1,` falls back to any donor (`WARN`), `node1` is the only
+  donor allowed and the node **refuses to start** without it (`BAD`).
+- **`sst/auth`** — an empty `wsrep_sst_auth` with a method that logs in to the
+  donor. The credentials can legitimately live in the `[sst]` section of the
+  config where the server cannot see them, so this is a `WARN` that says so
+  rather than a verdict.
+
+### `quorum/ignore-sb`, `quorum/bootstrap`, `quorum/weight`
+
+- **`quorum/ignore-sb`** — `pc.ignore_sb` on. The node keeps accepting writes in
+  a non-Primary component, so the next partition leaves both sides writable and
+  diverging. Usually left behind after a cluster was recovered by hand.
+- **`quorum/bootstrap`** — `pc.bootstrap` still set. A one-shot trigger left in
+  the configuration makes the node form its own Primary component next time it
+  starts alone.
+- **`quorum/weight`** — `pc.weight`, reported as arithmetic rather than as an
+  opinion: the sum, and whether one node alone holds a majority. Weight 0 is
+  `BAD` — that node never counts towards quorum, so the cluster has one fewer
+  vote than it has nodes.
+
+### `repl/sync-wait`
+
+The nodes disagreeing about `wsrep_sync_wait`. With it on, a read waits for the
+writes committed before it; with it off, the same query can return a row that is
+not there yet. When the nodes disagree the answer depends on which node the
+proxy picked, and every node is behaving exactly as configured. What the cluster
+*wants* is not this tool's business; the nodes not agreeing is.
+
+### `repl/auto-increment`
+
+`wsrep_auto_increment_control` keeps the auto-increment step and offsets in line
+with the membership. With it off, the values are whatever somebody typed: two
+nodes sharing an `auto_increment_offset` is `BAD` (the ids collide as soon as
+both take writes, and the damage lands in application data), and a step smaller
+than the number of nodes is `WARN`.
+
 ### `gcache/window`
 
 Not the gcache size: the **time** it buys at the current write rate. 512 MB is

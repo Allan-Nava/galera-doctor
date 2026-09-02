@@ -42,6 +42,12 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			"wsrep_provider":         "/usr/lib/galera/libgalera_smm.so",
 			"read_only":              "OFF",
 			"wsrep_provider_options": "gcache.size = 512M; gcs.fc_limit = 16;",
+			// State transfer: the settings that cost nothing until a node
+			// restarts and has to rejoin.
+			"wsrep_sst_method": "mariabackup",
+			"wsrep_sst_donor":  "",
+			"wsrep_sst_auth":   "********",
+			"wsrep_node_name":  name,
 		},
 		SysTables: map[string]string{"user": "aaaaaaaaaaaaaaaa", "column_stats": "bbbbbbbbbbbbbbbb"},
 		// A non-nil map is "the application schemas were read"; nil is "they
@@ -542,5 +548,343 @@ func TestIdenticalSchemasReportWhatWasCompared(t *testing.T) {
 	}
 	if !strings.Contains(f.Message, "3 node(s)") {
 		t.Fatalf("the message must say how many nodes were compared: %q", f.Message)
+	}
+}
+
+// GD-25 — SST readiness. Nothing here is wrong with the cluster today: it is
+// wrong with the next node that restarts, and no counter has an opinion.
+func TestDisagreementAboutTheSSTMethodIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["wsrep_sst_method"] = "rsync"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "sst/method")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN", f.Status)
+	}
+	if !strings.Contains(f.Message, "rsync") || !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the message must name the method and the node: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "donor") {
+		t.Fatalf("the hint has to explain that the donor serves the joiner's method: %q", f.Hint)
+	}
+}
+
+func TestOneSSTMethodEverywhereIsOK(t *testing.T) {
+	f := one(t, Run(threeHealthy(), nil, opts()), "sst/method")
+	if f.Status != finding.OK || !strings.Contains(f.Message, "mariabackup") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// A donor list is a list of names somebody typed. When it names a server that
+// is no longer in the cluster, the node cannot rejoin — and whether it refuses
+// to start or quietly falls back is decided by a trailing comma.
+func TestADonorThatIsNotInTheClusterIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_sst_donor"] = "sg-99"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "sst/donor")
+	if f.Status != finding.BAD {
+		t.Fatalf("a strict donor list naming a node that does not exist is BAD, got %s: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "sg-99") {
+		t.Fatalf("the message must name the donor: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "refuse") {
+		t.Fatalf("the hint has to say the node will refuse to start: %q", f.Hint)
+	}
+}
+
+// The same list with a trailing comma falls back to any donor: still worth
+// saying, not worth waking somebody for.
+func TestADonorListThatFallsBackIsOnlyAWarning(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_sst_donor"] = "sg-99,"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "sst/donor")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "sg-99") {
+		t.Fatalf("the message must name the donor: %q", f.Message)
+	}
+}
+
+// A donor named by any spelling the cluster answers to is fine: the node name,
+// the configured name, or the address it advertises.
+func TestADonorNamedByAnySpellingIsQuiet(t *testing.T) {
+	for _, donor := range []string{"cl-02", "ov-03,", "cl-02,ov-03"} {
+		snaps := threeHealthy()
+		snaps[0].Vars["wsrep_sst_donor"] = donor
+		rep := Run(snaps, nil, opts())
+		if fs := byCheck(t, rep, "sst/donor"); len(fs) != 0 {
+			t.Fatalf("donor %q is in the cluster and must be quiet: %+v", donor, fs)
+		}
+	}
+}
+
+// A backup-based SST needs credentials. An empty wsrep_sst_auth is not proof
+// they are missing — they can live in the [sst] section of the config — so it
+// is a warning that says exactly that.
+func TestABackupSSTWithoutCredentialsWarns(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["wsrep_sst_auth"] = ""
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "sst/auth")
+	if f.Status != finding.WARN || f.Target != "ov-03" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Hint, "[sst]") {
+		t.Fatalf("the hint must admit where else the credentials can be: %q", f.Hint)
+	}
+}
+
+func TestRsyncNeedsNoSSTCredentials(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_sst_method"] = "rsync"
+		snaps[i].Vars["wsrep_sst_auth"] = ""
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "sst/auth"); len(fs) != 0 {
+		t.Fatalf("rsync does not authenticate: %+v", fs)
+	}
+}
+
+// A build that does not report the method is not a build that agrees with
+// everybody else.
+func TestAnUnreportedSSTMethodIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Vars, "wsrep_sst_method")
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "sst/method"); len(fs) != 0 {
+		t.Fatalf("a variable nobody reported cannot be graded: %+v", fs)
+	}
+	if rep.Worst() != finding.OK {
+		t.Fatalf("and it must not make the cluster look unhealthy: %s", rep.Worst())
+	}
+}
+
+// GD-26 — a split brain that is already configured. The cluster is Primary and
+// green; the settings have already decided what happens at the next partition.
+func TestIgnoreSplitBrainLeftOnIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["wsrep_provider_options"] = "gcache.size = 512M; pc.ignore_sb = true;"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "quorum/ignore-sb")
+	if f.Status != finding.BAD || f.Target != "cl-02" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Hint, "partition") {
+		t.Fatalf("the hint has to say what happens at the next partition: %q", f.Hint)
+	}
+}
+
+func TestALeftoverBootstrapTriggerWarns(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_provider_options"] = "gcache.size = 512M; pc.bootstrap = true;"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "quorum/bootstrap")
+	if f.Status != finding.WARN || f.Target != "sg-01" {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// Weights are the quorum arithmetic. Unequal weights are legal and sometimes
+// deliberate, so the finding states the sum rather than an opinion.
+func TestUnequalQuorumWeightsAreReportedAsArithmetic(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_provider_options"] = "gcache.size = 512M; pc.weight = 3;"
+	snaps[1].Vars["wsrep_provider_options"] = "gcache.size = 512M; pc.weight = 1;"
+	snaps[2].Vars["wsrep_provider_options"] = "gcache.size = 512M; pc.weight = 1;"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "quorum/weight")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	// 3 of 5: sg-01 alone holds a majority, which is the whole point of saying
+	// it out loud.
+	if !strings.Contains(f.Message, "sg-01") || !strings.Contains(f.Message, "5") {
+		t.Fatalf("the message must carry the arithmetic: %q", f.Message)
+	}
+}
+
+func TestEqualQuorumWeightsAreOK(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_provider_options"] = "gcache.size = 512M; pc.weight = 1;"
+	}
+	f := one(t, Run(snaps, nil, opts()), "quorum/weight")
+	if f.Status != finding.OK {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// A node that cannot vote is a cluster of two wearing three nodes' clothes.
+func TestANodeWithZeroQuorumWeightIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["wsrep_provider_options"] = "gcache.size = 512M; pc.weight = 0;"
+	rep := Run(snaps, nil, opts())
+	var f *finding.Finding
+	for i := range rep.Findings {
+		if rep.Findings[i].Check == "quorum/weight" && rep.Findings[i].Target == "ov-03" {
+			f = &rep.Findings[i]
+		}
+	}
+	if f == nil || f.Status != finding.BAD {
+		t.Fatalf("a node with weight 0 never counts towards quorum: %+v", rep.Findings)
+	}
+}
+
+// A cluster that does not report pc.* at all is not a cluster with pc.* set to
+// zero.
+func TestMissingProviderOptionsAreNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Vars, "wsrep_provider_options")
+	}
+	rep := Run(snaps, nil, opts())
+	for _, check := range []string{"quorum/weight", "quorum/ignore-sb", "quorum/bootstrap"} {
+		if fs := byCheck(t, rep, check); len(fs) != 0 {
+			t.Fatalf("%s graded a variable nobody reported: %+v", check, fs)
+		}
+	}
+}
+
+// GD-27 — causal reads that are not. The same query is fresh or stale
+// depending on which node the proxy picked, and neither node reports anything.
+func TestNodesDisagreeingAboutSyncWaitIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_sync_wait"] = "1"
+	snaps[1].Vars["wsrep_sync_wait"] = "0"
+	snaps[2].Vars["wsrep_sync_wait"] = "0"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/sync-wait")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "sg-01") {
+		t.Fatalf("the odd node must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "proxy") && !strings.Contains(f.Hint, "which node") {
+		t.Fatalf("the hint has to say the answer depends on the node served: %q", f.Hint)
+	}
+}
+
+// Every node agreeing is not a finding, whatever the value: this tool does not
+// have an opinion about whether a cluster wants causal reads.
+func TestAgreementAboutSyncWaitIsQuiet(t *testing.T) {
+	for _, v := range []string{"0", "1", "7"} {
+		snaps := threeHealthy()
+		for i := range snaps {
+			snaps[i].Vars["wsrep_sync_wait"] = v
+		}
+		rep := Run(snaps, nil, opts())
+		if fs := byCheck(t, rep, "repl/sync-wait"); len(fs) != 0 {
+			t.Fatalf("wsrep_sync_wait=%s everywhere is a choice, not a finding: %+v", v, fs)
+		}
+	}
+}
+
+// GD-28 — auto-increment collision on failover.
+func TestSharedAutoIncrementOffsetsAreBad(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_auto_increment_control"] = "OFF"
+		snaps[i].Vars["auto_increment_increment"] = "3"
+		snaps[i].Vars["auto_increment_offset"] = "1"
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/auto-increment")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "offset") {
+		t.Fatalf("the message must say what collides: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "wsrep_auto_increment_control") {
+		t.Fatalf("the hint must name the setting that would fix it: %q", f.Hint)
+	}
+}
+
+// Galera manages the offsets itself unless somebody turned that off, and then
+// the values differing per node is exactly right.
+func TestGaleraManagedAutoIncrementIsOK(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_auto_increment_control"] = "ON"
+		snaps[i].Vars["auto_increment_increment"] = "3"
+		snaps[i].Vars["auto_increment_offset"] = fmt.Sprint(i + 1)
+	}
+	f := one(t, Run(snaps, nil, opts()), "repl/auto-increment")
+	if f.Status != finding.OK {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// Distinct offsets but a step too small for the cluster: the ids collide as
+// soon as the third node takes a write.
+func TestAnIncrementSmallerThanTheClusterWarns(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_auto_increment_control"] = "OFF"
+		snaps[i].Vars["auto_increment_increment"] = "2"
+		snaps[i].Vars["auto_increment_offset"] = fmt.Sprint(i + 1)
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/auto-increment")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "3") {
+		t.Fatalf("the message must compare the step with the number of nodes: %q", f.Message)
+	}
+}
+
+// GD-29 — tables Galera does not replicate at all. The write succeeds, the
+// counters stay green, and the row exists on one node.
+func TestNonInnoDBTablesAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].TablesNonInnoDB = []string{"app.legacy (MyISAM)"}
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "schema/engine")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "app.legacy") || !strings.Contains(f.Message, "MyISAM") {
+		t.Fatalf("the message must name the table and its engine: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "not replicated") {
+		t.Fatalf("the hint has to say the writes do not travel: %q", f.Hint)
+	}
+}
+
+// Nodes disagreeing about whether MyISAM is replicated is worse than nobody
+// replicating it: the same write lands on some nodes and not others.
+func TestDisagreementAboutMyisamReplicationIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].TablesNonInnoDB = []string{"app.legacy (MyISAM)"}
+		snaps[i].Vars["wsrep_mode"] = ""
+	}
+	snaps[1].Vars["wsrep_mode"] = "REPLICATE_MYISAM"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "schema/engine")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the odd node must be named: %q", f.Message)
+	}
+}
+
+func TestAnAllInnoDBSchemaIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "schema/engine"); len(fs) != 0 {
+		t.Fatalf("an InnoDB-only schema is not a finding: %+v", fs)
 	}
 }

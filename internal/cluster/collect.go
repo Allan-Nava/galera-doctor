@@ -113,6 +113,10 @@ func (c Collector) Collect(ctx context.Context, n Node) Snapshot {
 			snap.TablesNoPK = nil
 			_ = err
 		}
+		if snap.TablesNonInnoDB, err = tablesNotReplicated(ctx, db); err != nil {
+			snap.TablesNonInnoDB = nil
+			_ = err
+		}
 	}
 	return snap
 }
@@ -211,7 +215,6 @@ func sysTableFingerprints(ctx context.Context, db *sql.DB) (map[string]string, e
 // them, and a view's columns are derived from tables that are already being
 // compared.
 func appTableFingerprints(ctx context.Context, db *sql.DB) (map[string]string, error) {
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(SystemSchemas)), ",")
 	args := make([]any, 0, len(SystemSchemas))
 	for _, s := range SystemSchemas {
 		args = append(args, s)
@@ -225,7 +228,7 @@ func appTableFingerprints(ctx context.Context, db *sql.DB) (map[string]string, e
 		    ON t.TABLE_SCHEMA = c.TABLE_SCHEMA
 		   AND t.TABLE_NAME = c.TABLE_NAME
 		 WHERE t.TABLE_TYPE = 'BASE TABLE'
-		   AND c.TABLE_SCHEMA NOT IN (`+placeholders+`)
+		   AND c.TABLE_SCHEMA NOT IN (`+placeholders(len(SystemSchemas))+`)
 		 ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION`, args...)
 	if err != nil {
 		return nil, err
@@ -256,7 +259,6 @@ func appTableFingerprints(ctx context.Context, db *sql.DB) (map[string]string, e
 
 // tablesWithoutPK lists application base tables with no primary key.
 func tablesWithoutPK(ctx context.Context, db *sql.DB) ([]string, error) {
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(SystemSchemas)), ",")
 	args := make([]any, 0, len(SystemSchemas))
 	for _, s := range SystemSchemas {
 		args = append(args, s)
@@ -269,7 +271,7 @@ func tablesWithoutPK(ctx context.Context, db *sql.DB) ([]string, error) {
 		        AND c.TABLE_NAME = t.TABLE_NAME
 		        AND c.CONSTRAINT_TYPE = 'PRIMARY KEY'
 		 WHERE t.TABLE_TYPE = 'BASE TABLE'
-		   AND t.TABLE_SCHEMA NOT IN (`+placeholders+`)
+		   AND t.TABLE_SCHEMA NOT IN (`+placeholders(len(SystemSchemas))+`)
 		   AND c.CONSTRAINT_NAME IS NULL
 		 ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME`, args...)
 	if err != nil {
@@ -286,6 +288,50 @@ func tablesWithoutPK(ctx context.Context, db *sql.DB) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, rows.Err()
+}
+
+// ReplicatedEngines are the storage engines Galera replicates. Everything else
+// in an application schema is per-node data wearing a cluster's clothes: the
+// write succeeds, nothing certifies it, and no counter records that it went
+// nowhere.
+var ReplicatedEngines = []string{"InnoDB"}
+
+// tablesNotReplicated lists application base tables on an engine Galera does
+// not replicate, rendered "schema.table (ENGINE)" (GD-29).
+func tablesNotReplicated(ctx context.Context, db *sql.DB) ([]string, error) {
+	args := make([]any, 0, len(SystemSchemas)+len(ReplicatedEngines))
+	for _, s := range SystemSchemas {
+		args = append(args, s)
+	}
+	for _, e := range ReplicatedEngines {
+		args = append(args, e)
+	}
+	rows, err := Query(ctx, db, `
+		SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE
+		  FROM information_schema.TABLES
+		 WHERE TABLE_TYPE = 'BASE TABLE'
+		   AND ENGINE IS NOT NULL
+		   AND TABLE_SCHEMA NOT IN (`+placeholders(len(SystemSchemas))+`)
+		   AND ENGINE NOT IN (`+placeholders(len(ReplicatedEngines))+`)
+		 ORDER BY TABLE_SCHEMA, TABLE_NAME`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var schema, table, engine string
+		if err := rows.Scan(&schema, &table, &engine); err != nil {
+			return nil, err
+		}
+		out = append(out, fmt.Sprintf("%s.%s (%s)", schema, table, engine))
+	}
+	return out, rows.Err()
+}
+
+// placeholders is n comma-separated question marks.
+func placeholders(n int) string {
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
 }
 
 // redact keeps a DSN — and therefore a password — out of an error message. A
