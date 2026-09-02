@@ -1,0 +1,9 @@
+.git
+.github
+docs
+scripts
+dist
+cover.out
+coverage.html
+*.md
+!README.md

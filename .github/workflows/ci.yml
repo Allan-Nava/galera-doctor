@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - name: Test with coverage
+        run: |
+          go test -coverprofile=cover.out ./...
+          go tool cover -func=cover.out | tail -1
+
+      # Nodes are collected concurrently and folded back into one slice.
+      - name: Test with the race detector
+        run: go test -race ./...
+
+      - run: go build ./...
+
+      # One dependency, on purpose: the MySQL driver, plus what it needs. A
+      # second one is a decision, not an accident, so it fails the build.
+      - name: Still one dependency
+        run: |
+          # go list resolves both the block and the single-line form, and the
+          # indirect ones the driver pulls in — grepping go.mod misses those.
+          unexpected=$(go list -m -f '{{.Path}}' all | tail -n +2 \
+            | grep -vxE 'github.com/go-sql-driver/mysql|filippo.io/edwards25519' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::unexpected dependencies — one driver is the budget:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      # The promise that this tool cannot change a cluster is mechanical. Every
+      # query goes through cluster.Query, which refuses anything but SHOW and
+      # SELECT — and no writing statement may appear in the source at all.
+      - name: Still read-only
+        run: |
+          if grep -rniE '"[^"]*\b(INSERT INTO|UPDATE |DELETE FROM|DROP |ALTER |TRUNCATE |CREATE |SET GLOBAL|FLUSH )' \
+               cmd internal --include='*.go' | grep -v '_test.go'; then
+            echo "::error::a writing statement appears in the source: galera-doctor only issues SHOW and SELECT"
+            exit 1
+          fi
+          if grep -rnE '\b(db|tx)\.Exec' cmd internal --include='*.go' | grep -v '_test.go'; then
+            echo "::error::Exec has no business in a read-only auditor"
+            exit 1
+          fi
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: testpw
+        ports:
+          - 13306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      # The information_schema queries are the part a fixture cannot check: a
+      # subtly wrong join returns rows on one build and an error on another.
+      - name: The SQL, against a real server
+        env:
+          GD_TEST_DSN: root:testpw@tcp(127.0.0.1:13306)/
+        run: go test ./internal/cluster/ -run Real -v
+
+  backlog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint the backlog
+        run: ./scripts/backlog.sh lint
+      - name: ROADMAP.md is in sync with BACKLOG.md
+        run: ./scripts/backlog.sh check
+      - name: The roadmap generator and the linter
+        run: sh scripts/backlog_test.sh
+      - name: The issue planner
+        run: sh scripts/backlog_issues_test.sh
+
+  actions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@latest
+      - run: actionlint .github/workflows/*.yml
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  build-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o /dev/null ./cmd/galera-doctor
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image and run it
+        run: |
+          docker build -t galera-doctor:test --build-arg VERSION=ci-${{ github.sha }} .
+          docker run --rm galera-doctor:test checks

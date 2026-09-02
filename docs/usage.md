@@ -1,0 +1,82 @@
+# Usage
+
+```
+galera-doctor audit [flags]
+galera-doctor checks
+galera-doctor version
+```
+
+## Where the nodes come from
+
+Either a config file:
+
+```json
+{
+  "clusters": {
+    "compress": {
+      "nodes": [
+        {"name": "sg-01", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.11.1.5:3306)/"},
+        {"name": "cl-02", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.21.1.5:3306)/"},
+        {"name": "ov-03", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.35.1.5:3306)/"}
+      ],
+      "proxysql_dsn": "admin:${PROXYSQL_ADMIN_PASS}@tcp(10.11.1.9:6032)/",
+      "expect_nodes": 3
+    }
+  }
+}
+```
+
+...or the command line, with `--node` repeated:
+
+```sh
+galera-doctor audit \
+  --node "sg-01=audit:$PASS@tcp(10.11.1.5:3306)/" \
+  --node "cl-02=audit:$PASS@tcp(10.21.1.5:3306)/"
+```
+
+`${ENV_VAR}` is expanded in every DSN. An **unset** variable is an error, not an
+empty string: a DSN with an empty password fails with "access denied", which is
+a bad way to learn that a variable is missing. Unknown keys in the file are
+rejected too — a typo in `"noeds"` would otherwise produce a cluster with no
+nodes.
+
+A DSN is never printed. Findings identify nodes by name, and a driver error that
+quotes a DSN is redacted first.
+
+## Flags
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--config FILE` | — | cluster definitions (JSON) |
+| `--cluster NAME` | all | audit one cluster from the config |
+| `--node name=DSN` | — | a node, repeatable |
+| `--proxysql DSN` | — | ProxySQL admin interface to compare against |
+| `--state FILE` | — | remember counters between runs so rates can be graded |
+| `--expect-nodes N` | nodes given | membership the cluster should report |
+| `--timeout D` | `10s` | per-node timeout — one dead node does not decide the run's length |
+| `--no-systables` | off | skip the system table drift comparison |
+| `--no-schema` | off | skip the primary key check |
+| `--flow-warn F` / `--flow-bad F` | `0.01` / `0.10` | flow-control share of the interval |
+| `--ist-warn D` | `30m` | gcache window below which a restart means a full SST |
+| `--json` / `--findings` | — | full report / flat findings array |
+| `--min-severity S` | — | hide findings below `S` |
+| `--exit-on S` | never | exit 1 when a finding reaches `S` |
+
+## Exit status
+
+| Code | Meaning |
+|---|---|
+| `0` | the audit ran — findings are output, not an error |
+| `1` | `--exit-on` threshold reached |
+| `2` | usage error, or no node could be resolved |
+
+## In a scheduled job
+
+```sh
+galera-doctor audit --config /etc/galera-doctor/clusters.json \
+  --state /var/lib/galera-doctor/state.json \
+  --findings --min-severity WARN --exit-on BAD > findings.json
+```
+
+The state file is written **after** the output, so a failure to persist a
+baseline costs the next run its rates and nothing else.

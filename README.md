@@ -1,0 +1,205 @@
+<h1 align="center">galera-doctor</h1>
+
+<p align="center">
+  <a href="https://github.com/Allan-Nava/galera-doctor/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Allan-Nava/galera-doctor/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-10b981"></a>
+  <img alt="Go" src="https://img.shields.io/badge/go-1.25%2B-00ADD8">
+  <img alt="Read only" src="https://img.shields.io/badge/writes-none-10b981">
+</p>
+
+---
+
+**galera-doctor audits a MariaDB/MySQL Galera cluster read-only and reports the
+states the cluster's own metrics cannot show you.** One static Go binary, one
+dependency, only `SHOW` and `SELECT` — enforced in code, not promised in a
+README.
+
+`wsrep_cluster_size` being right is not the same as the cluster being right.
+These are the states this tool exists for:
+
+| What is wrong | Why no `wsrep_*` metric shows it |
+|---|---|
+| **A system table's definition differs between nodes** | Galera does not replicate maintenance on the server's own `mysql.*` tables. Two nodes can disagree about `mysql.column_stats` for months while every replication counter stays green — until one node's query plans, or its error log, go strange. |
+| **One name, two clusters** | Each half reports a consistent size and a Primary status. The divergence is only visible by comparing the `wsrep_cluster_state_uuid` of every node *to each other*. |
+| **The proxy and the cluster disagree** | ProxySQL says ONLINE, the node says Joined. Each dashboard is fine. Traffic is going to a node that is not synced. |
+| **The gcache is too small for the write rate** | 512 MB is either forty minutes or ninety seconds. Nobody finds out until a node restarts and needs a full SST, taking a donor out of service with it. |
+| **Flow control that already happened** | `wsrep_flow_control_paused` covers the time since the last status reset, so an incident from March reads the same today. Graded as a lifetime total it goes red once and stays red. |
+
+## What a run looks like
+
+```console
+$ galera-doctor audit --config clusters.json --cluster compress --state /var/lib/galera-doctor/compress.json
+BAD   compress  3 node(s)
+  BAD   cluster/uuid             compress       nodes report different cluster state UUIDs: 5b1e2a8c-111… (cl-02, sg-01) vs 9999aaaa-222… (ov-03)
+        ↳ this is a partition, not a lag: the groups have diverged and one side has to be reinitialised from the other
+  BAD   systables/drift          mysql.column_stats  definition differs across nodes: aaaaaaaaaaaa… (ov-03, sg-01) vs cccccccccccc… (cl-02)
+        ↳ Galera does not replicate this: fix it per node (mysql_upgrade, or align the definition by hand) — no wsrep_* metric will ever show it
+  WARN  flow/paused              sg-01          flow-controlled 2.10% of the last 10m0s
+        ↳ this node is intermittently the slowest in the cluster; look at its disk and its replication threads
+  WARN  schema/no-pk             schema         1 table(s) without a primary key: app.events
+  OK    cluster/size             compress       3 member(s), expected 3
+```
+
+*(The cluster above is the fixture the test suite audits — the failure shapes are
+real, the hostnames are not.)*
+
+Point it at something that is not a cluster and it says so once, instead of
+reporting an outage that is not happening:
+
+```console
+$ galera-doctor audit --node "local=root:***@tcp(127.0.0.1:13306)/"
+ERROR cluster  1 node(s)
+  ERROR cluster/membership       cluster        no node in this list is running Galera
+  ERROR node/not-galera          local          not a Galera node: wsrep_provider is not configured (server 11.4.13-MariaDB-ubu2404)
+        ↳ excluded from every cluster comparison — grading it would report an outage that is not happening
+```
+
+## Checks
+
+```console
+$ galera-doctor checks
+node/read                                  the node answered at all — every cluster finding is conditional on this
+cluster/uuid                               nodes reporting different state UUIDs: one name, two clusters
+cluster/conf-id                            nodes disagreeing about the membership generation
+cluster/primary                            a node that is not in the Primary component
+cluster/size                               membership size, and nodes disagreeing about it
+node/ready, node/connected, node/wsrep-on  the node is replicating at all
+node/state                                 Synced, Donor/Desynced, Joined, or something worse
+node/desync, node/read-only                deliberate exclusions that were never undone
+flow/paused                                share of the interval spent flow-controlling (needs --state)
+repl/cert-failures                         write conflicts as a share of writesets (needs --state)
+queue/recv, queue/send                     instantaneous queue depths
+systables/drift                            definitions of the mysql.* tables differing between nodes
+schema/no-pk                               tables Galera cannot certify reliably
+cluster/versions                           mixed server or wsrep provider versions
+gcache/window                              how much time the gcache buys before a restart needs a full SST (needs --state)
+proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
+```
+
+## A total is not a rate
+
+The wsrep counters only go up, and they reset on restart. A threshold over
+`wsrep_flow_control_paused` goes red once and stays red, and a check that stays
+red is a check people stop reading.
+
+So `--state FILE` remembers the counters between runs and the checks grade the
+**interval**:
+
+```console
+  WARN  flow/paused   sg-01   flow-controlled 2.10% of the last 10m0s
+```
+
+Without a baseline the same check reports the lifetime figure and refuses to
+judge it:
+
+```console
+  OK    flow/paused   sg-01   0.9% of the time since the last status reset (not graded: no baseline)
+        ↳ run again with --state to grade the interval between runs instead of the lifetime total
+```
+
+A counter that went backwards, a node whose uptime shrank, a state file from
+another format version: all of them mean *no baseline*, never a negative rate
+and never a spectacular one.
+
+## Configuration
+
+```json
+{
+  "clusters": {
+    "compress": {
+      "nodes": [
+        {"name": "sg-01", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.11.1.5:3306)/"},
+        {"name": "cl-02", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.21.1.5:3306)/"},
+        {"name": "ov-03", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.35.1.5:3306)/"}
+      ],
+      "proxysql_dsn": "admin:${PROXYSQL_ADMIN_PASS}@tcp(10.11.1.9:6032)/",
+      "expect_nodes": 3
+    }
+  }
+}
+```
+
+`${ENV_VAR}` is expanded in every DSN, and an **unset** variable is an error
+rather than an empty string — "access denied" is a terrible way to learn that a
+variable is missing. A DSN is never printed, and a driver error that quotes one
+is redacted before it reaches a terminal.
+
+Or skip the file entirely: `--node name=DSN`, repeatable.
+
+The audit user needs very little:
+
+```sql
+CREATE USER 'audit'@'%' IDENTIFIED BY '…';
+GRANT USAGE, PROCESS, SELECT ON *.* TO 'audit'@'%';   -- SELECT is for information_schema
+```
+
+Without `SELECT` on `information_schema` the drift comparison reports the node
+as *not audited* instead of quietly leaving it out of the comparison.
+
+## Read-only, mechanically
+
+Every query goes through one function that refuses anything which is not a
+`SHOW` or a `SELECT`, CI greps the source for a writing statement, and there is
+a test that tries `UPDATE`, `DELETE`, `SET GLOBAL`, `FLUSH` and `DROP` and
+requires all of them to be rejected. This tool gets pointed at clusters that are
+already having a bad day; "it doesn't write anything" has to be a property, not
+a claim.
+
+## Install
+
+```sh
+go install github.com/Allan-Nava/galera-doctor/cmd/galera-doctor@latest
+```
+
+Or build the static binary, and the image that contains nothing else:
+
+```sh
+go build -o galera-doctor ./cmd/galera-doctor
+docker build -t galera-doctor .
+```
+
+## Output and exit status
+
+| Flag | Output |
+|---|---|
+| *(none)* | text, worst cluster first, hint on its own line |
+| `--json` | everything |
+| `--findings` | the flat findings array the sibling tools speak — empty array, never `null` |
+| `--min-severity S` | hide findings below `S`; the cluster header stays |
+
+| Exit | Meaning |
+|---|---|
+| `0` | the audit ran — findings are output, not an error |
+| `1` | `--exit-on S` was given and something reached `S` |
+| `2` | usage error, or no node could be resolved |
+
+## What it is not
+
+- **Not a monitoring system.** It has no daemon, no scraper and no history
+  beyond the one state file it uses for rates. It is what you run from cron, a
+  CI job or an incident.
+- **Not a generic MySQL health check.** Connections, buffer pool, slow queries
+  and replica lag belong in [checkfleet](https://github.com/Allan-Nava/checkfleet),
+  which has a `mysql` module. This one only knows about Galera.
+- **Not a repair tool.** It reports; a human decides. Bootstrapping a cluster,
+  dropping a peer or resyncing a node are operations with consequences, and
+  they are not one flag away here.
+
+## Development
+
+```sh
+go test ./...
+go test -race ./...
+
+# the SQL, against a throwaway server
+docker run -d --rm --name gd-test -e MARIADB_ROOT_PASSWORD=testpw -p 13306:3306 mariadb:11.4
+GD_TEST_DSN='root:testpw@tcp(127.0.0.1:13306)/' go test ./internal/cluster/ -run Real -v
+```
+
+`BACKLOG.md` is the single source of truth for planned work and
+[ROADMAP.md](ROADMAP.md) is generated from it. Contributor brief:
+[AGENTS.md](AGENTS.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

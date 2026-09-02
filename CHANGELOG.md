@@ -1,0 +1,59 @@
+# Changelog
+
+All notable changes to galera-doctor are recorded here. The format is
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the versioning is
+[Semantic Versioning](https://semver.org/). Every release is a tagged `vX.Y.Z`
+with its own section; `minor` for new checks or flags, `patch` for fixes. Items
+reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
+
+## [0.1.0] - 2026-09-02
+
+First release: the Galera states that no `wsrep_*` counter can show you, from a
+read-only audit.
+
+### Added
+
+- **Read-only by construction** (GD-1) — every query goes through one function
+  that refuses anything but `SHOW` and `SELECT`; a test tries `UPDATE`,
+  `DELETE`, `SET GLOBAL`, `FLUSH` and `DROP` and requires all of them to be
+  rejected, and CI greps the source for a writing statement or an `Exec`.
+- **System table drift** (GD-2) — the column definitions of every table in the
+  `mysql` schema are fingerprinted per node and compared. Galera does not
+  replicate maintenance on its own system tables, so a difference here is
+  invisible to every replication metric. Reports which table and which nodes.
+- **Cluster identity** (GD-3) — `wsrep_cluster_state_uuid` and
+  `wsrep_cluster_conf_id` compared across nodes, so one cluster name covering
+  two clusters is a finding instead of something noticed from row counts.
+  Nodes disagreeing about the membership size beat the size itself.
+- **Counters graded as rates** (GD-4) — `--state FILE` remembers the totals
+  between runs; flow control, certification failures and the gcache window are
+  graded over the interval. Without a baseline they report the lifetime figure
+  and say they were not graded.
+- **A restart invalidates the baseline** (GD-5) — a counter that went backwards,
+  or an uptime that shrank, means *no baseline*: never a negative rate and never
+  a wraparound-sized incident.
+- **Node states** (GD-6) — `wsrep_ready`, `wsrep_connected`, `wsrep_on`,
+  `wsrep_desync`, `read_only` and the local state comment, each reported with
+  what it means operationally: a Donor is a warning, `wsrep_on` OFF is not.
+- **A standalone server is one finding, not five** (GD-7) — a server without
+  `wsrep_provider` is excluded from every cluster comparison, instead of firing
+  size, quorum, ready and wsrep-on at once and describing an outage that is not
+  happening.
+- **ProxySQL against the cluster** (GD-8) — nodes missing from every serving
+  hostgroup, ONLINE-but-not-Synced, shunned-but-Synced, and hostgroups with
+  nothing online. The offline hostgroup is recognised as monitor-managed and
+  never graded. Node matching tries every spelling the node answers to.
+- **Missing primary keys** (GD-9) — the union across nodes, with the reason
+  Galera calls them unsupported.
+- **Config, DSNs and secrets** (GD-10) — JSON config with `${ENV_VAR}`
+  expansion where an unset variable is an error, `--node name=DSN` for a
+  file-less run, and a redactor so a driver error cannot carry a password into
+  a terminal or a ticket.
+- **Three renderers and exit 0** (GD-11) — text worst-first, `--json`,
+  `--findings` (an empty array, never `null`); exit 0 whenever the audit ran,
+  with `--exit-on S` to opt into exit 1.
+- **The SQL, against a real server** (GD-12) — an integration test behind
+  `GD_TEST_DSN`, run in CI against a MariaDB service container, because an
+  `information_schema` join that is subtly wrong looks perfect from a fixture.
+
+[0.1.0]: https://github.com/Allan-Nava/galera-doctor/releases/tag/v0.1.0

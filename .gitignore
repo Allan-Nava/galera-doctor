@@ -1,0 +1,19 @@
+/galera-doctor
+/dist/
+/cover.out
+/coverage.html
+.DS_Store
+
+# A cluster definition is a map of somebody's infrastructure — hostnames, ports,
+# usernames — and one careless edit away from carrying a password. Real
+# configurations stay out of this repository; docs/clusters.example.json is
+# written by hand and survives the rule.
+/clusters*.json
+!/docs/clusters.example.json
+
+# The state file is a local cache of counters, per host.
+/*.state.json
+/state.json
+
+# The rendered documentation site, generated from docs/.
+/_site/
