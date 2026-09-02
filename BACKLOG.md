@@ -147,6 +147,13 @@ which is why these belong together rather than one per release.
   `collect` nor `proxysql`. One list, two consumers, `scripts/backlog.sh
   labels` to inspect or create it, and a test that walks it in both directions.
   <!-- gd: prio=med size=S labels=project,tests ver=0.2.1 -->
+- [x] **GD-44 — The page has to be findable**: canonical URL, Open Graph and
+  Twitter card tags, a 1200x630 preview card rendered from
+  `assets/og-image.html`, schema.org JSON-LD, `robots.txt` and a generated
+  `sitemap.xml` — with `scripts/seo_test.sh` as the gate, because every one of
+  these fails silently. Somebody searching for the symptom rather than for this
+  tool has to land somewhere.
+  <!-- gd: prio=med size=S labels=docs,tests ver=0.5.1 -->
 - [x] **GD-25 — SST readiness**: `wsrep_sst_method` compared across nodes, and
   `wsrep_sst_donor` checked against the names the cluster actually has. A node
   whose method differs from its peers', or whose donor list names a server that

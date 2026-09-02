@@ -1,0 +1,5 @@
+# galera-doctor — https://github.com/Allan-Nava/galera-doctor
+User-agent: *
+Allow: /
+
+Sitemap: https://allan-nava.github.io/galera-doctor/sitemap.xml

@@ -3,13 +3,57 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>galera-doctor — the Galera states no wsrep_* counter can show you</title>
-<meta name="description" content="A read-only audit of a MariaDB/MySQL Galera cluster that reports the states the cluster's own metrics cannot show you. One static Go binary, only SHOW and SELECT.">
+<title>galera-doctor — read-only Galera cluster audit for MariaDB/MySQL</title>
+<meta name="description" content="A read-only audit of a MariaDB/MySQL Galera cluster: system table drift, split brain, a proxy that disagrees. One static Go binary, SHOW and SELECT only.">
+<link rel="canonical" href="https://allan-nava.github.io/galera-doctor/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="author" content="Allan Nava">
+<meta name="theme-color" content="#0b1120">
 <link rel="icon" href="mark.svg" type="image/svg+xml">
-<meta property="og:title" content="galera-doctor">
-<meta property="og:description" content="The Galera states no wsrep_* counter can show you. Read-only, one static Go binary.">
+<link rel="apple-touch-icon" href="og-image.png">
+
+<!-- The preview card: Slack, a search result, somebody's tweet. An og:image
+     has to be an absolute URL to a raster image, or the card renders empty. -->
+<meta property="og:title" content="galera-doctor — read-only Galera cluster audit">
+<meta property="og:description" content="Reports the states a Galera cluster's own metrics cannot show you: a drifted system table, one name over two clusters, a proxy that disagrees, flow control that already happened.">
 <meta property="og:type" content="website">
-<meta property="og:image" content="logo.svg">
+<meta property="og:url" content="https://allan-nava.github.io/galera-doctor/">
+<meta property="og:site_name" content="galera-doctor">
+<meta property="og:locale" content="en_GB">
+<meta property="og:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="galera-doctor: three findings from an audit — a drifted system table, one name over two clusters, and a node flow-controlled 2.10% of the last ten minutes.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="galera-doctor — read-only Galera cluster audit">
+<meta name="twitter:description" content="The Galera states no wsrep_* counter can show you. One static Go binary, SHOW and SELECT only.">
+<meta name="twitter:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+
+<!-- Structured data. Nothing renders it, so a typo here is silent: it is
+     parsed by scripts/seo_test.sh for that reason. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "galera-doctor",
+  "description": "A read-only audit of a MariaDB/MySQL Galera cluster that reports the states the cluster's own metrics cannot show you: system table drift between nodes, one cluster name covering two clusters, a proxy whose view disagrees with the cluster's, a gcache too small for the write rate, and flow control graded over an interval instead of a lifetime total.",
+  "url": "https://allan-nava.github.io/galera-doctor/",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "Database administration",
+  "operatingSystem": "Linux, macOS, FreeBSD, Windows",
+  "softwareRequirements": "MariaDB or MySQL with the Galera wsrep provider",
+  "downloadUrl": "https://github.com/Allan-Nava/galera-doctor/releases",
+  "installUrl": "https://github.com/Allan-Nava/galera-doctor#install",
+  "license": "https://opensource.org/licenses/MIT",
+  "keywords": "Galera, Galera Cluster, MariaDB, MySQL, ProxySQL, wsrep, split brain, schema drift, SST, gcache, database audit, SRE",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+  "author": { "@type": "Person", "name": "Allan Nava", "url": "https://github.com/Allan-Nava" },
+  "codeRepository": "https://github.com/Allan-Nava/galera-doctor",
+  "programmingLanguage": "Go"
+}
+</script>
 <style>
   :root {
     --bg: #0b1120;

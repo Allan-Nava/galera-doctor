@@ -127,3 +127,10 @@ this file wins and CLAUDE.md gets fixed.
 - **The landing page has no build step.** `site/index.html` is hand-written and
   self-contained — no generator, no theme, no dependency to keep current — and
   `.github/workflows/pages.yml` uploads the directory as it stands.
+- **The page's SEO is tags nothing renders.** A missing canonical, a relative
+  `og:image`, JSON-LD with a typo: none of them fails a browser or a build, so
+  `scripts/seo_test.sh` is the only thing standing between them and a broken
+  preview card. `site/og-image.png` is a screenshot of
+  `assets/og-image.html` at exactly 1200x630 — regenerate it with
+  `scripts/og.sh` (needs a headless Chrome) after changing the tagline or the
+  logo, and never hand-edit the PNG.

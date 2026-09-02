@@ -239,6 +239,7 @@ scripts/release.sh build 0.0.0-dev dist   # the release artefacts, locally
 scripts/brew.sh render v0.0.0-dev dist/SHA256SUMS  # the formula they imply
 scripts/links.sh             # every local link in the docs and the site resolves
 scripts/site.sh serve        # the landing page in site/, on localhost:8000
+scripts/og.sh                # re-render the preview card at 1200x630
 scripts/repo.sh apply        # write .github/repo.env to the GitHub About box
 ```
 

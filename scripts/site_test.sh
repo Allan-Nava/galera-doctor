@@ -138,6 +138,52 @@ else
 	fi
 fi
 
+# ---------------------------------------------------------------------------
+# sync also writes the sitemap, because its lastmod is the one thing on the
+# page that has to be generated: a date somebody typed is a date that is wrong
+# a week later.
+# ---------------------------------------------------------------------------
+fixture
+assert_pass "sync writes the sitemap" sync
+
+checks=$((checks + 1))
+if [ -f "$tmp/site/sitemap.xml" ]; then
+	echo "ok   the sitemap is written"
+else
+	fail "no sitemap.xml after a sync"
+fi
+
+checks=$((checks + 1))
+if grep -qF "<loc>https://allan-nava.github.io/galera-doctor/</loc>" "$tmp/site/sitemap.xml"; then
+	echo "ok   the sitemap lists the canonical URL"
+else
+	fail "the sitemap does not list the canonical URL"
+	sed 's/^/       /' "$tmp/site/sitemap.xml" >&2
+fi
+
+checks=$((checks + 1))
+if grep -qE '<lastmod>[0-9]{4}-[0-9]{2}-[0-9]{2}</lastmod>' "$tmp/site/sitemap.xml"; then
+	echo "ok   the lastmod is a date"
+else
+	fail "the lastmod is not a YYYY-MM-DD date"
+	sed 's/^/       /' "$tmp/site/sitemap.xml" >&2
+fi
+
+checks=$((checks + 1))
+if command -v python3 >/dev/null 2>&1; then
+	if python3 -c 'import sys,xml.dom.minidom as m; m.parse(sys.argv[1])' "$tmp/site/sitemap.xml" >/dev/null 2>&1; then
+		echo "ok   the sitemap is well-formed XML"
+	else
+		fail "the sitemap is not well-formed XML"
+	fi
+else
+	echo "ok   the sitemap is well-formed XML (skipped: no python3)"
+fi
+
+# The check is about the logo, not the sitemap: a regenerated lastmod must not
+# fail the drift gate on every commit.
+assert_pass "the check still passes with a sitemap present" check
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures of $checks checks failed" >&2
