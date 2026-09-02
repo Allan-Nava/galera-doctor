@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**24 items · 14 shipped · 10 open · 3 milestones.**
+**32 items · 14 shipped · 18 open · 4 milestones.**
 
 ## At a glance
 
@@ -15,6 +15,7 @@
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
 | **M2** — Deeper into the cluster | `v0.2.0` | **now** | `..........` 0% | 6 | 0 |
 | **M3** — Fit the toolchain | `v0.3.0` | next | `###.......` 33% | 4 | 2 |
+| **M4** — What the next restart costs | `v0.4.0` | later | `..........` 0% | 8 | 0 |
 
 ## Next up
 
@@ -76,17 +77,32 @@ Target `v0.3.0` · next · 4 open · 2 shipped · `###.......` 33%
 | **GD-23** — Identity and landing page | med | S | docs,project | shipped `0.1.1` |
 | **GD-24** — The project's own metadata is generated too | med | S | project,docs | shipped `0.1.1` |
 
+### M4 — What the next restart costs
+
+Target `v0.4.0` · later · 8 open · 0 shipped · `..........` 0%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-25** — SST readiness | high | M | check | open |
+| **GD-26** — A split brain that is already configured | high | M | check | open |
+| **GD-27** — Causal reads that are not | high | S | check | open |
+| **GD-28** — Auto-increment collision on failover | high | S | check | open |
+| **GD-29** — Tables Galera does not replicate at all | high | M | check | open |
+| **GD-30** — Write-set limits that disagree | med | S | check | open |
+| **GD-31** — The segment map against the topology | med | M | check | open |
+| **GD-32** — What changed since the last run | med | M | output | open |
+
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 13 | 6 |
+| `check` | 20 | 13 |
 | `cli` | 2 | 1 |
 | `docs` | 3 | 1 |
 | `integration` | 1 | 1 |
+| `output` | 2 | 1 |
 | `release` | 1 | 1 |
 | `collect` | 1 | 0 |
-| `output` | 1 | 0 |
 | `project` | 2 | 0 |
 | `proxysql` | 1 | 0 |
 | `tests` | 1 | 0 |

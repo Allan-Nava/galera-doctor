@@ -127,3 +127,53 @@ touching this file, or CI will fail.
   the site; `scripts/site.sh` keeps the page's logo a copy of `assets/`. Each
   has a CI gate, so drift fails the build rather than sitting on the repository
   front page. <!-- gd: prio=med size=S labels=project,docs ver=0.1.1 -->
+
+## M4 — What the next restart costs <!-- ms: target=v0.4.0 phase=later -->
+
+Every item here is a state that is free today and expensive at the next
+restart, failover or partition: the cluster is Synced, every counter is green,
+and the configuration or the schema has already decided what will happen when
+something moves. That is the same shape as GD-2 — invisible until it is not —
+which is why these belong together rather than one per release.
+
+- [ ] **GD-25 — SST readiness**: `wsrep_sst_method` compared across nodes, and
+  `wsrep_sst_donor` checked against the names the cluster actually has. A node
+  whose method differs from its peers', or whose donor list names a server that
+  was decommissioned in March, is a node that cannot rejoin — and nothing says
+  so until it tries. <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-26 — A split brain that is already configured**: `pc.ignore_sb`,
+  `pc.bootstrap` and `pc.weight` read out of `wsrep_provider_options` per node.
+  A node left with `pc.ignore_sb=true` after somebody recovered a cluster by
+  hand will keep serving writes on the wrong side of the next partition, and
+  the weights decide which side that is. Reported as the arithmetic it implies,
+  not as a variable dump. <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-27 — Causal reads that are not**: `wsrep_sync_wait` compared across
+  nodes. When one node has it and another does not, the same query returns
+  fresh or stale data depending on which node the proxy picked — a bug that
+  arrives as "sometimes the row is not there yet" and appears in no metric on
+  either node. <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-28 — Auto-increment collision on failover**: `auto_increment_offset`,
+  `auto_increment_increment` and `wsrep_auto_increment_control` per node. Two
+  nodes sharing an offset generate the same ids the moment writes reach both,
+  and the damage is duplicate keys in application data rather than anything
+  replication reports. <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-29 — Tables Galera does not replicate at all**: application tables on
+  a storage engine outside InnoDB — MyISAM and Aria unless
+  `wsrep_replicate_myisam` says otherwise. The writes succeed, the counters stay
+  green and the rows exist on one node. Sibling of `schema/no-pk` and a
+  different diagnosis. <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-30 — Write-set limits that disagree**: `wsrep_max_ws_size` and
+  `wsrep_max_ws_rows` across nodes. A transaction that certifies on the node
+  that accepted it and is refused by an applier with a smaller limit takes that
+  applier out of the cluster, which reads as a node failure rather than as the
+  configuration difference it is. <!-- gd: prio=med size=S labels=check -->
+- [ ] **GD-31 — The segment map against the topology**: `gmcast.segment` per
+  node next to the addresses. Two nodes in the same datacentre in different
+  segments, or three datacentres all in segment 0, is a WAN bill and a slow
+  cluster that replicates perfectly. Complements GD-17, which measures the
+  latency rather than the intent. <!-- gd: prio=med size=M labels=check -->
+- [ ] **GD-32 — What changed since the last run**: the state file already holds
+  the previous run's findings; print the transitions — appeared, cleared, got
+  worse — for the person who ran the audit twenty minutes ago and needs to know
+  whether the thing they did helped. Not a history, and not a daemon: one diff
+  against one file. <!-- gd: prio=med size=M labels=output -->
