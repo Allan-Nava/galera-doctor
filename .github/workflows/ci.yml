@@ -114,6 +114,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Test first covers the tooling too: these three are CI gates, and a gate
+      # that stopped firing looks exactly like a repository with no problems.
+      - name: The link checker
+        run: sh scripts/links_test.sh
+      - name: The site sync
+        run: sh scripts/site_test.sh
+      - name: The About box tooling, against a fake gh
+        run: sh scripts/repo_test.sh
+
       - name: Every local link resolves
         run: ./scripts/links.sh
 

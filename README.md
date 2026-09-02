@@ -217,6 +217,10 @@ scripts/site.sh serve        # the landing page in site/, on localhost:8000
 scripts/repo.sh apply        # write .github/repo.env to the GitHub About box
 ```
 
+Each of them has a `scripts/<name>_test.sh` next to it — POSIX sh, fixtures,
+a fake `gh` where GitHub is involved — and CI runs all of them: a gate that
+quietly stopped firing looks exactly like a repository with no problems.
+
 The repository's description, website and topics live in
 [.github/repo.env](.github/repo.env) rather than in a text field somebody typed
 once: `scripts/repo.sh apply` writes them and CI fails when the two drift.

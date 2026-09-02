@@ -22,6 +22,14 @@ reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
   something that is not in the tree; `scripts/site.sh` keeps the page's logo a
   copy of `assets/`. All three run in CI, so a change to how the project
   describes itself arrives in a diff.
+- **Tests for the tooling** (GD-24) — `scripts/links_test.sh`,
+  `scripts/site_test.sh` and `scripts/repo_test.sh` (against a fake `gh`, so
+  neither GitHub nor the network is touched) join the backlog's own tests in
+  CI. They found three real bugs in the link checker: a Markdown title —
+  `[x](file.md "Title")` — was read as a second, broken link; a `<picture>`
+  element's `srcset` was not checked at all, which is where the README's dark
+  logo lives; and a link inside a code span or a fenced block was read as a
+  link, so documenting the first bug in this file broke the build.
 
 ## [0.1.0] - 2026-09-02
 

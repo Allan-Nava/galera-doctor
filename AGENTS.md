@@ -52,7 +52,11 @@ this file wins and CLAUDE.md gets fixed.
   produces exit 1; a usage error or an unusable config exits 2.
 - **Test first, always**, against fixtures — the interesting states (a split
   brain, a drifted system table, a proxy that disagrees) cannot be conjured on
-  demand against a real server. The SQL itself is covered by the integration
+  demand against a real server. **This covers the tooling**: every
+  `scripts/x.sh` has a `scripts/x_test.sh` written before it changes, wired
+  into CI in the same commit, with the script taking env overrides
+  (`BACKLOG_FILE`, `REPO_ENV`, `ASSETS_DIR`, a fake `gh` on `PATH`) so a test
+  never touches this repository or the network. The SQL itself is covered by the integration
   test behind `GD_TEST_DSN`, which is where a wrong `information_schema` join
   gets caught.
 - **Backlog first**: work exists in `BACKLOG.md` with a `GD-n` id, and
