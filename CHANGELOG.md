@@ -6,6 +6,26 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.4.0] - 2026-09-02
+
+### Added
+
+- **`gcache/recover`** (GD-33) — `gcache.recover` off, one finding per node
+  because each node's restart is its own. `gcache/window` measures how much
+  time the write-set cache buys before a restarting node needs a full state
+  transfer, and this setting discards that cache along with the process: the
+  window is a buffer being thrown away, and a two-minute maintenance restart
+  costs a full SST — which takes a donor out of service with it. A provider
+  that does not report the option is not a provider with it off.
+
+- **`repl/osu-method`** (GD-34) — a node whose `wsrep_OSU_method` is RSU. TOI
+  replicates a schema change to every node and NBO does the same without the
+  cluster-wide lock; RSU applies it where it was run and leaves the others
+  alone, which is precisely how the drift `schema/drift` reports comes to
+  exist. The hint says so: the cause reported next to the symptom is the
+  difference between a finding and a diagnosis, and a test asserts both survive
+  into the same run.
+
 ## [0.3.0] - 2026-09-02
 
 ### Added

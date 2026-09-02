@@ -128,6 +128,8 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(quorumSettings(rep.Cluster, live)...)
 	add(syncWait(rep.Cluster, live)...)
 	add(autoIncrement(rep.Cluster, live)...)
+	add(gcacheRecover(live)...)
+	add(osuMethod(live)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
 	add(versions(rep.Cluster, live)...)
@@ -1049,6 +1051,64 @@ func storageEngines(live []cluster.Snapshot) []finding.Finding {
 // containsFold is strings.Contains, case-insensitively.
 func containsFold(haystack, needle string) bool {
 	return strings.Contains(strings.ToUpper(haystack), strings.ToUpper(needle))
+}
+
+// gcacheRecover reports a restart that throws the write-set cache away (GD-33).
+//
+// gcache/window measures how much time the cache buys before a restarting node
+// needs a full state transfer. With gcache.recover off, a clean restart
+// discards the cache along with the process: the window the other check
+// reports is a buffer this setting quietly throws away, and the node comes back
+// needing an SST — which takes a donor out of service with it. Each node's
+// restart is its own, so this is one finding per node rather than one about the
+// cluster.
+func gcacheRecover(live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, s := range live {
+		v, ok := s.ProviderOption("gcache.recover")
+		// The option arrived in Galera 3.19: a provider that does not report
+		// it is not a provider with it off.
+		if !ok || strings.TrimSpace(v) == "" {
+			continue
+		}
+		if truthy(v) {
+			continue
+		}
+		out = append(out, finding.Finding{
+			Check: "gcache/recover", Target: s.Node, Status: finding.WARN,
+			Message: fmt.Sprintf("gcache.recover is %s: a clean restart discards this node's write-set cache",
+				strings.TrimSpace(v)),
+			Hint: "with it on the node rejoins by IST from its own cache after a restart; with it off even a two-minute maintenance window costs a full SST, and an SST takes a donor out of service too",
+		})
+	}
+	return out
+}
+
+// osuMethod reports the DDL method that explains schema/drift (GD-34).
+//
+// TOI replicates a schema change to every node; NBO does the same without
+// holding the cluster-wide lock. RSU does not replicate it at all — it applies
+// the change on the node it was run on and leaves the others alone, which is
+// precisely how the application schema drift that schema/drift reports comes to
+// exist. Reporting the cause next to the symptom is the difference between a
+// finding and a diagnosis.
+func osuMethod(live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, s := range live {
+		v, ok := s.Var("wsrep_osu_method")
+		if !ok || strings.TrimSpace(v) == "" {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(v), "RSU") {
+			continue
+		}
+		out = append(out, finding.Finding{
+			Check: "repl/osu-method", Target: s.Node, Status: finding.WARN,
+			Message: "wsrep_OSU_method is RSU: DDL run on this node is applied here and not replicated",
+			Hint:    "this is where a schema/drift finding comes from — RSU is a per-node operation to be turned on for one change and off again, not a default; TOI and NBO both replicate",
+		})
+	}
+	return out
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.

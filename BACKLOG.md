@@ -198,17 +198,17 @@ asked to behave as one thing.
   worse — for the person who ran the audit twenty minutes ago and needs to know
   whether the thing they did helped. Not a history, and not a daemon: one diff
   against one file. <!-- gd: prio=med size=M labels=output -->
-- [ ] **GD-33 — A restart that throws the gcache away**: `gcache.recover` per
+- [x] **GD-33 — A restart that throws the gcache away**: `gcache.recover` per
   node. With it off, a clean restart loses the write-set cache and the node
   needs a full SST for a two-minute maintenance window — the gcache window
   check (`gcache/window`) measures a buffer that this setting quietly discards.
-  <!-- gd: prio=high size=S labels=check -->
-- [ ] **GD-34 — The DDL method that explains GD-13**: `wsrep_OSU_method` per
+  <!-- gd: prio=high size=S labels=check ver=0.4.0 -->
+- [x] **GD-34 — The DDL method that explains GD-13**: `wsrep_OSU_method` per
   node. A node left on RSU applies schema changes locally and does not
   replicate them, which is precisely how the application schema drift that
   `schema/drift` reports comes to exist. Reporting the cause next to the
   symptom is the difference between a finding and a diagnosis.
-  <!-- gd: prio=high size=S labels=check -->
+  <!-- gd: prio=high size=S labels=check ver=0.4.0 -->
 - [ ] **GD-35 — Durability that is not the cluster's**:
   `innodb_flush_log_at_trx_commit` and `sync_binlog` across nodes. A cluster's
   durability is the weakest node's, not the average: one node set to flush

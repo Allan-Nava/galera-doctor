@@ -129,6 +129,31 @@ is why no `wsrep_*` counter has an opinion about any of it.
   `BAD` — that node never counts towards quorum, so the cluster has one fewer
   vote than it has nodes.
 
+### `gcache/recover`
+
+`gcache.recover` off. [`gcache/window`](#gcachewindow) measures how much time
+the write-set cache buys before a restarting node needs a full state transfer —
+and with `gcache.recover` off, a clean restart discards that cache along with
+the process. The window is a buffer the setting throws away: even a two-minute
+maintenance restart then costs a full SST, which takes a donor out of service
+with it.
+
+One finding per node, because each node's restart is its own. A provider that
+does not report the option is not a provider with it off — it arrived in Galera
+3.19.
+
+### `repl/osu-method`
+
+`wsrep_OSU_method` set to RSU. TOI replicates a schema change to every node and
+NBO does the same without holding the cluster-wide lock; **RSU does not
+replicate it at all** — it applies the change where it was run and leaves the
+others alone.
+
+That is precisely how the drift [`schema/drift`](#schemadrift) reports comes to
+exist, which is why this check is here: the cause reported next to the symptom
+is the difference between a finding and a diagnosis. RSU is something to turn on
+for one operation and off again, not a default.
+
 ### `repl/sync-wait`
 
 The nodes disagreeing about `wsrep_sync_wait`. With it on, a read waits for the

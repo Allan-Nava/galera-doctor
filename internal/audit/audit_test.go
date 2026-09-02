@@ -888,3 +888,128 @@ func TestAnAllInnoDBSchemaIsQuiet(t *testing.T) {
 		t.Fatalf("an InnoDB-only schema is not a finding: %+v", fs)
 	}
 }
+
+// GD-33 — a restart that throws the gcache away.
+//
+// gcache/window measures how much time the write-set cache buys before a
+// restart needs a full SST. With gcache.recover off, a clean restart discards
+// that cache: the window the other check reports is a buffer this setting
+// quietly throws away.
+func TestGcacheRecoverOffIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["wsrep_provider_options"] = "gcache.size = 512M; gcache.recover = no;"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "gcache/recover")
+	if f.Status != finding.WARN || f.Target != "cl-02" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Hint, "SST") {
+		t.Fatalf("the hint has to say what the restart costs: %q", f.Hint)
+	}
+}
+
+func TestGcacheRecoverOnIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_provider_options"] = "gcache.size = 512M; gcache.recover = yes;"
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "gcache/recover"); len(fs) != 0 {
+		t.Fatalf("gcache.recover on is the answer, not a finding: %+v", fs)
+	}
+}
+
+// A provider that does not report the option is not a provider with it off:
+// gcache.recover arrived in Galera 3.19.
+func TestAnUnreportedGcacheRecoverIsNotGraded(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "gcache/recover"); len(fs) != 0 {
+		t.Fatalf("an option nobody reported cannot be graded: %+v", fs)
+	}
+}
+
+// Each node's restart is its own: two nodes with it off are two findings, not
+// one about the cluster.
+func TestGcacheRecoverIsReportedPerNode(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_provider_options"] = "gcache.size = 512M; gcache.recover = no;"
+	snaps[2].Vars["wsrep_provider_options"] = "gcache.size = 512M; gcache.recover = no;"
+	rep := Run(snaps, nil, opts())
+	fs := byCheck(t, rep, "gcache/recover")
+	if len(fs) != 2 {
+		t.Fatalf("want one finding per node, got %d: %+v", len(fs), fs)
+	}
+}
+
+// GD-34 — the DDL method that explains GD-13.
+func TestRSUIsFoundAndPointsAtTheDrift(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["wsrep_osu_method"] = "RSU"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/osu-method")
+	if f.Status != finding.WARN || f.Target != "ov-03" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Message, "RSU") {
+		t.Fatalf("the message must name the method: %q", f.Message)
+	}
+	// The whole point of this check is that it is the cause of the other one.
+	if !strings.Contains(f.Hint, "schema/drift") {
+		t.Fatalf("the hint must connect it to the drift it produces: %q", f.Hint)
+	}
+}
+
+func TestTOIIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_osu_method"] = "TOI"
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "repl/osu-method"); len(fs) != 0 {
+		t.Fatalf("TOI is the default and replicates DDL: %+v", fs)
+	}
+}
+
+// NBO replicates the DDL too — it is TOI without the cluster-wide lock, not
+// RSU with a nicer name.
+func TestNBOIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_osu_method"] = "NBO"
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "repl/osu-method"); len(fs) != 0 {
+		t.Fatalf("NBO replicates: %+v", fs)
+	}
+}
+
+func TestAnUnreportedOSUMethodIsNotGraded(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "repl/osu-method"); len(fs) != 0 {
+		t.Fatalf("a variable nobody reported cannot be graded: %+v", fs)
+	}
+}
+
+// A drifted schema and a node on RSU in the same report is a diagnosis rather
+// than two findings: the second explains the first, and both have to survive
+// into the same run.
+func TestRSUAndDriftAreBothReported(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["wsrep_osu_method"] = "RSU"
+	snaps[2].AppTables["app.users"] = "9999999999999999"
+	rep := Run(snaps, nil, opts())
+
+	osu := one(t, rep, "repl/osu-method")
+	if osu.Target != "ov-03" {
+		t.Fatalf("the RSU node must be named: %+v", osu)
+	}
+	var drift bool
+	for _, f := range rep.Findings {
+		if f.Check == "schema/drift" && f.Target == "app.users" && f.Status == finding.BAD {
+			drift = true
+		}
+	}
+	if !drift {
+		t.Fatalf("the drift must still be reported next to its cause: %+v", rep.Findings)
+	}
+}

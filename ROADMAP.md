@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**37 items · 23 shipped · 14 open · 5 milestones.**
+**37 items · 25 shipped · 12 open · 5 milestones.**
 
 ## At a glance
 
@@ -16,7 +16,7 @@
 | **M2** — Deeper into the cluster | `v0.2.0` | **now** | `##........` 17% | 5 | 1 |
 | **M3** — Fit the toolchain | `v0.3.0` | next | `######....` 57% | 3 | 4 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 6 |
-| **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `..........` 0% | 6 | 0 |
+| **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `###.......` 33% | 4 | 2 |
 
 ## Next up
 
@@ -24,12 +24,12 @@ The open items with the highest priority in the milestones that are in flight.
 
 - **GD-14** — Backup freshness · `high` · size `M` · check (M2, target `v0.2.0`)
 - **GD-19** — checkfleet module · `high` · size `M` · integration (M3, target `v0.3.0`)
-- **GD-33** — A restart that throws the gcache away · `high` · size `S` · check (M5, target `v0.3.0`)
-- **GD-34** — The DDL method that explains GD-13 · `high` · size `S` · check (M5, target `v0.3.0`)
 - **GD-15** — SST/IST history · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-16** — Node clock skew · `med` · size `S` · check (M2, target `v0.2.0`)
 - **GD-17** — Cross-DC latency from the cluster's own numbers · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-21** — Docs site · `med` · size `M` · docs (M3, target `v0.3.0`)
+- **GD-30** — Write-set limits that disagree · `med` · size `S` · check (M5, target `v0.3.0`)
+- **GD-31** — The segment map against the topology · `med` · size `M` · check (M5, target `v0.3.0`)
 
 ## Milestones
 
@@ -94,22 +94,22 @@ Target `v0.2.0` · shipped · 0 open · 6 shipped · `##########` 100%
 
 ### M5 — The cluster you cannot see from one node
 
-Target `v0.3.0` · next · 6 open · 0 shipped · `..........` 0%
+Target `v0.3.0` · next · 4 open · 2 shipped · `###.......` 33%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-33** — A restart that throws the gcache away | high | S | check | open |
-| **GD-34** — The DDL method that explains GD-13 | high | S | check | open |
 | **GD-30** — Write-set limits that disagree | med | S | check | open |
 | **GD-31** — The segment map against the topology | med | M | check | open |
 | **GD-32** — What changed since the last run | med | M | output | open |
 | **GD-35** — Durability that is not the cluster's | med | S | check | open |
+| **GD-33** — A restart that throws the gcache away | high | S | check | shipped `0.4.0` |
+| **GD-34** — The DDL method that explains GD-13 | high | S | check | shipped `0.4.0` |
 
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 23 | 10 |
+| `check` | 23 | 8 |
 | `cli` | 2 | 1 |
 | `docs` | 3 | 1 |
 | `integration` | 1 | 1 |

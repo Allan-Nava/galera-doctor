@@ -90,6 +90,8 @@ repl/sync-wait                             nodes disagreeing about causal reads
 repl/auto-increment                        ids that collide once a second node takes writes
 cluster/versions                           mixed server or wsrep provider versions
 gcache/window                              how much time the gcache buys before a restart needs a full SST (needs --state)
+gcache/recover                             a clean restart that discards the write-set cache anyway
+repl/osu-method                            a node on RSU: DDL applied here and not replicated
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
 ```
 
