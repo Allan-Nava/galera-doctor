@@ -6,6 +6,43 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.5.2] - 2026-09-02
+
+### Fixed
+
+- **The release published no image, and no formula** (GD-45) — every tag from
+  v0.3.0 to v0.5.1 published its archives, its checksums and its attestation,
+  and then failed twice over in silence:
+
+  - `ghcr.io/${{ github.repository_owner }}/…` renders as
+    `ghcr.io/Allan-Nava/galera-doctor`, and a registry refuses a capital
+    letter: `invalid tag … repository name must be lowercase`. The image name
+    is now lowercased once, in one step, and used for both the tags and the
+    attestation subject.
+  - the formula step decided whether to commit with `git diff --quiet --
+    Formula/`, and `git diff` does not see a file that is not tracked yet — so
+    the first release wrote `Formula/galera-doctor.rb`, reported "the formula is
+    already current", and published a tap with no formula in it. The decision
+    moved into `scripts/brew.sh commit`, which uses `git status`, and it is
+    tested against a real temporary repository for all three cases: untracked,
+    unchanged, changed.
+
+  Two more that fell out of writing the tests:
+
+  - `brew.sh write` used `render > formula.rb`, which truncates the formula
+    before `render` runs: a partial release would have left the tap holding an
+    empty file. It renders to a temporary file and moves it.
+  - `checksum` reported a missing platform with `exit`, from inside a command
+    substitution, where an exit only leaves the subshell — and `set -e` is
+    switched off inside an `if !` condition, so a formula with an **empty**
+    `sha256` would have been written and committed. It returns instead, and the
+    caller propagates.
+
+- **Publishing is repeatable** (GD-45) — a tag whose first attempt created the
+  release and failed afterwards can be re-run: the workflow updates an existing
+  release (`gh release edit`, `gh release upload --clobber`) instead of stopping
+  at "already exists".
+
 ## [0.5.1] - 2026-09-02
 
 ### Added

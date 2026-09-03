@@ -152,6 +152,89 @@ else
 	pass "an unknown subcommand is a usage error"
 fi
 
+# ---------------------------------------------------------------------------
+# commit: write the formula and commit it *if it changed*.
+#
+# The release workflow used `git diff --quiet -- Formula/` for that decision,
+# and git diff does not see an untracked file — so the very first release wrote
+# the formula, decided it was "already current", and published a tap with no
+# formula in it. Three cases, and the first one is the one that shipped broken.
+# ---------------------------------------------------------------------------
+repo="$tmp/repo"
+mkdir -p "$repo"
+(
+	cd "$repo"
+	git init -q -b main
+	git config user.email t@example.com
+	git config user.name test
+	echo hello >README.md
+	git add README.md
+	git commit -qm initial
+)
+cp "$tmp/SHA256SUMS" "$repo/SHA256SUMS"
+
+# 1. The formula does not exist yet: untracked, and it has to be committed.
+checks=$((checks + 1))
+if (cd "$repo" && sh "$script" commit v0.3.0 SHA256SUMS) >"$tmp/commit1.txt" 2>&1 &&
+	(cd "$repo" && git log -1 --name-only --format=%s | grep -qF "Formula/galera-doctor.rb"); then
+	echo "ok   a formula that did not exist yet is committed"
+else
+	fail "the first formula was not committed — this is the bug that shipped"
+	sed 's/^/       /' "$tmp/commit1.txt" >&2
+fi
+
+checks=$((checks + 1))
+if grep -qF "0.3.0" "$(cd "$repo" && git rev-parse --show-toplevel)/Formula/galera-doctor.rb"; then
+	echo "ok   and it is the formula for the version asked for"
+else
+	fail "the committed formula is not for 0.3.0"
+fi
+
+# 2. Nothing changed: no second commit, and no error either.
+checks=$((checks + 1))
+before=$(cd "$repo" && git rev-parse HEAD)
+if (cd "$repo" && sh "$script" commit v0.3.0 SHA256SUMS) >"$tmp/commit2.txt" 2>&1 &&
+	[ "$(cd "$repo" && git rev-parse HEAD)" = "$before" ]; then
+	echo "ok   an unchanged formula does not make an empty commit"
+else
+	fail "a second run committed again, or failed"
+	sed 's/^/       /' "$tmp/commit2.txt" >&2
+fi
+
+# 3. A new version: tracked, modified, committed.
+checks=$((checks + 1))
+sed 's/0\.3\.0/0.4.0/g' "$tmp/SHA256SUMS" >"$repo/SHA256SUMS"
+if (cd "$repo" && sh "$script" commit v0.4.0 SHA256SUMS) >"$tmp/commit3.txt" 2>&1 &&
+	[ "$(cd "$repo" && git rev-parse HEAD)" != "$before" ] &&
+	grep -qF "0.4.0" "$repo/Formula/galera-doctor.rb"; then
+	echo "ok   a changed formula is committed"
+else
+	fail "the updated formula was not committed"
+	sed 's/^/       /' "$tmp/commit3.txt" >&2
+fi
+
+# The commit says which version it is for: a tap's history is the only place
+# that record exists.
+checks=$((checks + 1))
+if (cd "$repo" && git log -1 --format=%s) | grep -qF "0.4.0"; then
+	echo "ok   the commit message names the version"
+else
+	fail "the commit message does not name the version: $(cd "$repo" && git log -1 --format=%s)"
+fi
+
+# A partial release must not be committed at all: a formula with a missing
+# platform is worse than yesterday's formula.
+checks=$((checks + 1))
+grep -v darwin_arm64 "$repo/SHA256SUMS" >"$repo/partial.txt"
+before=$(cd "$repo" && git rev-parse HEAD)
+if (cd "$repo" && sh "$script" commit v0.5.0 partial.txt) >"$tmp/commit4.txt" 2>&1; then
+	fail "a partial release was committed"
+elif [ "$(cd "$repo" && git rev-parse HEAD)" = "$before" ]; then
+	echo "ok   a partial release commits nothing"
+else
+	fail "a partial release moved HEAD"
+fi
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures of $checks checks failed" >&2

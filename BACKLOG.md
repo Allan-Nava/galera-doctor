@@ -154,6 +154,13 @@ which is why these belong together rather than one per release.
   these fails silently. Somebody searching for the symptom rather than for this
   tool has to land somewhere.
   <!-- gd: prio=med size=S labels=docs,tests ver=0.5.1 -->
+- [x] **GD-45 — The release that published no image**: every tag from v0.3.0 to
+  v0.5.1 shipped its archives and failed to push a container image —
+  `github.repository_owner` is spelled `Allan-Nava` and a registry refuses a
+  capital letter — while the Homebrew formula was written and never committed,
+  because `git diff` does not see a file that is not tracked yet. Both are now
+  gated, and publishing is repeatable so a half-finished tag can be re-run.
+  <!-- gd: prio=high size=S labels=release,tests ver=0.5.2 -->
 - [x] **GD-25 — SST readiness**: `wsrep_sst_method` compared across nodes, and
   `wsrep_sst_donor` checked against the names the cluster actually has. A node
   whose method differs from its peers', or whose donor list names a server that

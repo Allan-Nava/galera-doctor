@@ -233,6 +233,56 @@ else
 	sed 's/^/       /' "$tmp/real.txt" >&2
 fi
 
+# ---------------------------------------------------------------------------
+# The container image name.
+#
+# Every release from v0.3.0 to v0.5.1 published its archives and failed to
+# publish an image, with one error: `invalid tag
+# "ghcr.io/Allan-Nava/galera-doctor:0.5.1": repository name must be lowercase`.
+# github.repository_owner is spelled the way the account is spelled, and a
+# registry does not accept a capital letter. actionlint cannot see this; the
+# only thing that can is a check that the name is lowercased before it reaches
+# a tag, and that the docs name the same image.
+# ---------------------------------------------------------------------------
+workflow="$root/.github/workflows/release.yml"
+
+checks=$((checks + 1))
+if grep -qE 'ghcr\.io/\$\{\{ *github\.repository(_owner)? *\}\}' "$workflow"; then
+	fail "an image tag interpolates the owner directly — it is spelled Allan-Nava and a registry wants lowercase"
+	grep -nE 'ghcr\.io/' "$workflow" | sed 's/^/       /' >&2
+else
+	pass "no image tag interpolates the repository owner directly"
+fi
+
+checks=$((checks + 1))
+if grep -qE "tr '?A-Z'? '?a-z'?|,,}" "$workflow"; then
+	pass "the image name is lowercased before it is used"
+else
+	fail "nothing in the workflow lowercases the image name"
+fi
+
+# The name in the workflow and the name in the docs have to be the same string,
+# or the docs point at an image that does not exist.
+checks=$((checks + 1))
+if grep -qF "ghcr.io/allan-nava/galera-doctor" "$root/docs/install.md" &&
+	grep -qF "ghcr.io/allan-nava/galera-doctor" "$root/README.md"; then
+	pass "the docs name the lowercase image"
+else
+	fail "the docs do not name ghcr.io/allan-nava/galera-doctor"
+fi
+
+# ---------------------------------------------------------------------------
+# Publishing has to be repeatable. The first attempt at v0.5.1 created the
+# release and then failed elsewhere; re-running the workflow for that tag must
+# fix the release rather than fail on "already exists".
+# ---------------------------------------------------------------------------
+checks=$((checks + 1))
+if grep -qE 'gh release (view|edit)' "$workflow" && grep -qF -- "--clobber" "$workflow"; then
+	pass "a release that already exists is updated, not refused"
+else
+	fail "re-running the workflow for an existing tag would fail on gh release create"
+fi
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures of $checks checks failed" >&2

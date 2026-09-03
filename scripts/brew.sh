@@ -8,6 +8,7 @@
 #
 #   scripts/brew.sh render VERSION SHA256SUMS   the formula, on stdout
 #   scripts/brew.sh write  VERSION SHA256SUMS   into Formula/galera-doctor.rb
+#   scripts/brew.sh commit VERSION SHA256SUMS   ... and commit it if it changed
 #
 # A platform missing from the checksum file is a hard error: rendering a blank
 # sha256 would ship a download nobody can verify. FORMULA_DIR overrides where
@@ -23,11 +24,16 @@ repo="Allan-Nava/galera-doctor"
 brew_platforms="darwin_arm64 darwin_amd64 linux_arm64 linux_amd64"
 
 # checksum <sums-file> <archive-name> — the sha256, or a named failure.
+#
+# It returns rather than exits: it is called inside a command substitution, and
+# an exit there only leaves the subshell. That is how a partial release used to
+# render a formula with an empty sha256 — `set -e` is switched off inside an
+# `if !` condition, so nothing downstream noticed.
 checksum() {
 	line=$(grep -F " $2" "$1" | head -1 || true)
 	if [ -z "$line" ]; then
 		echo "brew.sh: $2 is not in $1 — the release did not produce every platform the formula needs" >&2
-		exit 2
+		return 1
 	fi
 	printf '%s\n' "${line%% *}"
 }
@@ -46,9 +52,11 @@ render() {
 	bare=${tag#v}
 
 	# Every checksum first, so a partial release fails before it has written
-	# half a formula to stdout.
+	# half a formula to stdout. The `|| return` is what makes the failure
+	# survive being called from an `if !` condition.
 	for p in $brew_platforms; do
-		eval "sha_$p=\$(checksum \"\$sums\" \"galera-doctor_${bare}_${p}.tar.gz\")"
+		sha=$(checksum "$sums" "galera-doctor_${bare}_${p}.tar.gz") || return 2
+		eval "sha_$p=\$sha"
 	done
 
 	url_prefix="https://github.com/$repo/releases/download/$tag"
@@ -97,6 +105,40 @@ end
 EOF
 }
 
+# write renders to a temporary file first. `render > formula.rb` truncates the
+# formula before render runs, so a partial release would leave the tap holding
+# an empty file — worse than holding yesterday's formula.
+write() {
+	dir=${FORMULA_DIR:-Formula}
+	mkdir -p "$dir"
+	tmp=$(mktemp "${TMPDIR:-/tmp}/galera-doctor-formula.XXXXXX")
+	if ! render "$@" >"$tmp"; then
+		rm -f "$tmp"
+		exit 2
+	fi
+	mv "$tmp" "$dir/galera-doctor.rb"
+	echo "wrote $dir/galera-doctor.rb"
+}
+
+# commit writes the formula and commits it only if it changed.
+#
+# This decision used to be `git diff --quiet -- Formula/` in the release
+# workflow, and git diff does not see an untracked file: the first release
+# wrote the formula, concluded it was already current, and published a tap with
+# no formula in it. git status sees both.
+commit() {
+	dir=${FORMULA_DIR:-Formula}
+	write "$@"
+	if [ -z "$(git status --porcelain -- "$dir")" ]; then
+		echo "the formula is already current"
+		return 0
+	fi
+	version=${1:-}
+	git add -- "$dir"
+	git commit -q -m "Formula: galera-doctor ${version#v} [skip ci]" -- "$dir"
+	echo "committed $dir/galera-doctor.rb for ${version#v}"
+}
+
 case "${1:-}" in
 render)
 	shift
@@ -104,13 +146,14 @@ render)
 	;;
 write)
 	shift
-	dir=${FORMULA_DIR:-Formula}
-	mkdir -p "$dir"
-	render "$@" >"$dir/galera-doctor.rb"
-	echo "wrote $dir/galera-doctor.rb"
+	write "$@"
+	;;
+commit)
+	shift
+	commit "$@"
 	;;
 *)
-	echo "usage: scripts/brew.sh [render|write] VERSION SHA256SUMS" >&2
+	echo "usage: scripts/brew.sh [render|write|commit] VERSION SHA256SUMS" >&2
 	exit 2
 	;;
 esac

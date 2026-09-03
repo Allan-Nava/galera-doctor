@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**44 items · 30 shipped · 14 open · 6 milestones.**
+**45 items · 31 shipped · 14 open · 6 milestones.**
 
 ## At a glance
 
@@ -15,7 +15,7 @@
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
 | **M2** — Deeper into the cluster | `v0.2.0` | **now** | `###.......` 33% | 4 | 2 |
 | **M3** — Fit the toolchain | `v0.3.0` | next | `######....` 57% | 3 | 4 |
-| **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 7 |
+| **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `########..` 83% | 1 | 5 |
 | **M6** — Configured, and not running | `v0.6.0` | next | `..........` 0% | 6 | 0 |
 
@@ -82,7 +82,7 @@ Target `v0.3.0` · next · 3 open · 4 shipped · `######....` 57%
 
 ### M4 — What the next restart costs
 
-Target `v0.2.0` · shipped · 0 open · 7 shipped · `##########` 100%
+Target `v0.2.0` · shipped · 0 open · 8 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
@@ -91,6 +91,7 @@ Target `v0.2.0` · shipped · 0 open · 7 shipped · `##########` 100%
 | **GD-27** — Causal reads that are not | high | S | check | shipped `0.2.0` |
 | **GD-28** — Auto-increment collision on failover | high | S | check | shipped `0.2.0` |
 | **GD-29** — Tables Galera does not replicate at all | high | M | check | shipped `0.2.0` |
+| **GD-45** — The release that published no image | high | S | release,tests | shipped `0.5.2` |
 | **GD-36** — One label vocabulary | med | S | project,tests | shipped `0.2.1` |
 | **GD-44** — The page has to be findable | med | S | docs,tests | shipped `0.5.1` |
 
@@ -133,5 +134,5 @@ Target `v0.6.0` · next · 6 open · 0 shipped · `..........` 0%
 | `collect` | 1 | 0 |
 | `delivery` | 1 | 0 |
 | `project` | 3 | 0 |
-| `release` | 1 | 0 |
-| `tests` | 3 | 0 |
+| `release` | 2 | 0 |
+| `tests` | 4 | 0 |
