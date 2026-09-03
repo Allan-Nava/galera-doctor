@@ -17,3 +17,6 @@
 
 # The rendered documentation site, generated from docs/.
 /_site/
+
+# graphify keeps its knowledge graph here: generated, local, and 700 kB of HTML.
+graphify-out/
