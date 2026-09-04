@@ -6,6 +6,67 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.0.0] - 2026-09-04
+
+M7 is finished, and with it every milestone that describes work this tool can
+do through the channel it has: read-only SQL to the nodes and to a ProxySQL
+admin interface. 1.0.0 says that, and nothing more — the audit is still
+read-only by construction, the output contracts (`--findings`, `--json`, the
+exit codes) are the ones documented, and the two milestones left are M8, which
+is items that **cannot** be built here with the reason attached, and M9, which
+is a different replication model.
+
+### Added
+
+- **`repl/writers`** (GD-49) — `wsrep_replicated` per node over the interval:
+  who is actually writing. "We only write to one node" is a belief, and no
+  per-node dashboard shows a second writer because each node looks busy in its
+  own right. Writing to several nodes is where certification conflicts come
+  from, so this is the *cause* behind a `repl/cert-failures` finding rather
+  than another symptom. A share under 2% is a heartbeat or a schema tool, not a
+  writer; an idle interval says so instead of inventing one; and without a
+  baseline it reports the lifetime total and says it is not graded.
+
+- **`node/binlog`, `node/binlog-format`, `node/binlog-updates`** (GD-51) —
+  Galera does not need the binary log and everything around a cluster does. A
+  node with `log_bin` off is one no backup, no downstream replica and no
+  point-in-time recovery can be taken from — found during a failover, when it
+  is the one left. `binlog_format` is graded both ways: the nodes disagreeing,
+  and the nodes agreeing on something that is not `ROW`, which Galera's own
+  documentation requires. `log_slave_updates` differing means failing over to
+  the wrong node breaks a downstream replica silently.
+
+- **`node/restarted`** (GD-52) — `wsrep_gcomm_uuid` compared with the previous
+  run, or an uptime shorter than it was on a build that does not report it. A
+  restart resets every counter, which is why the rate checks fall back to *no
+  baseline*; this is the check that says what happened instead of leaving that
+  as an unexplained gap. And if nobody planned the restart, that is the finding
+  rather than the ungraded rates. An absent uuid means nothing to compare, so
+  an older state file reports nothing — this field did not need the format
+  version to move, because an absent uuid cannot be mistaken for a different
+  one.
+
+- **`cluster/membership-view`** (GD-53) — `information_schema.WSREP_MEMBERSHIP`
+  where the `wsrep_info` plugin is installed: the group's own member list
+  against the nodes this run audited, matched on every spelling a node answers
+  to. A member the group lists that nobody audited is `WARN`, because every
+  cluster-wide statement in the report was made without it; a node that
+  reported itself as a member while the group has not listed it is `BAD`, which
+  no single node can report about itself. The plugin is optional, so its
+  absence is silence rather than a gap — nothing was denied, and
+  `audit/coverage` does not count it.
+
+### Changed
+
+- **M3 is shipped, and the two items in it that were not toolchain work moved
+  out.** `GD-19` (a `galera` module in checkfleet) joined M8: the code lives in
+  that repository, and what this one owes it is the stable `--findings` array
+  it already emits. `GD-22` (Percona XtraDB Cluster and MySQL Group
+  Replication) became **M9 — Beyond Galera**, because pointing the existing
+  checks at a different replication model would be a rename rather than
+  support. Neither move is bar-polishing: M3 was about this repository's own
+  toolchain, and neither of those was.
+
 ## [0.12.0] - 2026-09-04
 
 M2 is finished: everything in it that can be done through this tool's channel

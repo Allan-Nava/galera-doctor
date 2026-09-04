@@ -155,6 +155,49 @@ A cluster is drawn as three nodes replicating to each other. Real deployments ar
 <p>
 <code>nil</code> versus empty is load-bearing here: a server with no replication answers with zero rows, and that is a different statement from a read that was refused. The second is reported by <a href="#auditcoverage"><code>audit/coverage</code></a>.
 </p>
+<h3 id="repl-writers"><code>repl/writers</code></h3>
+<p>
+<code>wsrep_replicated</code> per node — the writesets each node <em>originated</em> — over the interval. Needs <code>--state</code>.
+</p>
+<p>
+"We only write to one node" is a belief, and this is the number that confirms or refutes it. No per-node dashboard shows a second writer, because each node looks busy in its own right; and writing to several nodes is where certification conflicts come from, so this is the <strong>cause</strong> behind a <a href="#replcert-failures"><code>repl/cert-failures</code></a> finding rather than another symptom.
+</p>
+<p>
+A share under 2% is a heartbeat, a schema tool or a stray connection rather than a writer. An idle interval says so instead of inventing one. Without a baseline it reports who has written since each node last restarted — a different question — and says it is not graded.
+</p>
+<h3 id="node-binlog-node-binlog-format-node-binlog-updates"><code>node/binlog</code>, <code>node/binlog-format</code>, <code>node/binlog-updates</code></h3>
+<p>
+Galera does not need the binary log: it replicates by writeset. Everything <em>around</em> a cluster needs it.
+</p>
+<ul>
+<li><strong><code>node/binlog</code></strong> — <code>log_bin</code> off on some nodes and on elsewhere: no backup, no downstream replica and no point-in-time recovery can be taken from those, which is discovered during a failover, when they are the ones left.</li>
+<li><strong><code>node/binlog-format</code></strong> — the nodes disagreeing, and also the nodes agreeing on something that is not <code>ROW</code>, which Galera's own documentation requires.</li>
+<li><strong><code>node/binlog-updates</code></strong> — <code>log_slave_updates</code> differing, graded only when some node has a binary log at all. A node that does not log the writesets it applies cannot be the source of a downstream replica: failing over to it breaks that replica silently.</li>
+</ul>
+<h3 id="node-restarted"><code>node/restarted</code></h3>
+<p>
+<code>wsrep_gcomm_uuid</code> — a new value on every boot — compared with the previous run, or an uptime shorter than it was on a build that does not report the uuid. Needs <code>--state</code>.
+</p>
+<p>
+A restart resets every counter, which is why the rate checks fall back to <em>no baseline</em>; on its own that fallback looks like the tool being coy. This says what happened. And if nobody planned the restart, <strong>that</strong> is the finding rather than the ungraded rates.
+</p>
+<p>
+An absent uuid on either side means nothing to compare, so a state file written before this check existed reports nothing — it did not need the format version to move, because an absent uuid cannot be mistaken for a different one.
+</p>
+<h3 id="cluster-membership-view"><code>cluster/membership-view</code></h3>
+<p>
+<code>information_schema.WSREP_MEMBERSHIP</code>, where the <code>wsrep_info</code> plugin is installed: the <strong>group's own</strong> list of its members, against the nodes this run audited. Members are matched on every spelling a node answers to, the same way the proxy's server list is.
+</p>
+<p>
+Two independent views of one membership, and the findings live only in the comparison:
+</p>
+<ul>
+<li>a member the group lists that this run never read is <code>WARN</code> — every cluster-wide statement in the report was made without it, and a member nobody knows about is a member nobody is watching;</li>
+<li>a node that reported itself as a member while the group has not listed it is <code>BAD</code>, which no single node can report about itself.</li>
+</ul>
+<p>
+The plugin is optional, so its absence is silence rather than a gap: unlike a missing grant, nothing was denied, and <a href="#auditcoverage"><code>audit/coverage</code></a> does not count it.
+</p>
 <h3 id="repl-server-id-repl-gtid-domain-repl-gtid-strict"><code>repl/server-id</code>, <code>repl/gtid-domain</code>, <code>repl/gtid-strict</code></h3>
 <ul>
 <li><strong><code>repl/server-id</code></strong> — two nodes sharing a <code>server_id</code> is <code>BAD</code>, with or without a binary log: a replica downstream cannot tell their events apart, and a replication loop becomes possible.</li>

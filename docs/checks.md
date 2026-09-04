@@ -123,6 +123,72 @@ statements.
 with zero rows, and that is a different statement from a read that was refused.
 The second is reported by [`audit/coverage`](#auditcoverage).
 
+### `repl/writers`
+
+`wsrep_replicated` per node — the writesets each node *originated* — over the
+interval. Needs `--state`.
+
+"We only write to one node" is a belief, and this is the number that confirms
+or refutes it. No per-node dashboard shows a second writer, because each node
+looks busy in its own right; and writing to several nodes is where certification
+conflicts come from, so this is the **cause** behind a
+[`repl/cert-failures`](#replcert-failures) finding rather than another symptom.
+
+A share under 2% is a heartbeat, a schema tool or a stray connection rather than
+a writer. An idle interval says so instead of inventing one. Without a baseline
+it reports who has written since each node last restarted — a different question
+— and says it is not graded.
+
+### `node/binlog`, `node/binlog-format`, `node/binlog-updates`
+
+Galera does not need the binary log: it replicates by writeset. Everything
+*around* a cluster needs it.
+
+- **`node/binlog`** — `log_bin` off on some nodes and on elsewhere: no backup,
+  no downstream replica and no point-in-time recovery can be taken from those,
+  which is discovered during a failover, when they are the ones left.
+- **`node/binlog-format`** — the nodes disagreeing, and also the nodes agreeing
+  on something that is not `ROW`, which Galera's own documentation requires.
+- **`node/binlog-updates`** — `log_slave_updates` differing, graded only when
+  some node has a binary log at all. A node that does not log the writesets it
+  applies cannot be the source of a downstream replica: failing over to it
+  breaks that replica silently.
+
+### `node/restarted`
+
+`wsrep_gcomm_uuid` — a new value on every boot — compared with the previous run,
+or an uptime shorter than it was on a build that does not report the uuid. Needs
+`--state`.
+
+A restart resets every counter, which is why the rate checks fall back to *no
+baseline*; on its own that fallback looks like the tool being coy. This says
+what happened. And if nobody planned the restart, **that** is the finding rather
+than the ungraded rates.
+
+An absent uuid on either side means nothing to compare, so a state file written
+before this check existed reports nothing — it did not need the format version
+to move, because an absent uuid cannot be mistaken for a different one.
+
+### `cluster/membership-view`
+
+`information_schema.WSREP_MEMBERSHIP`, where the `wsrep_info` plugin is
+installed: the **group's own** list of its members, against the nodes this run
+audited. Members are matched on every spelling a node answers to, the same way
+the proxy's server list is.
+
+Two independent views of one membership, and the findings live only in the
+comparison:
+
+- a member the group lists that this run never read is `WARN` — every
+  cluster-wide statement in the report was made without it, and a member nobody
+  knows about is a member nobody is watching;
+- a node that reported itself as a member while the group has not listed it is
+  `BAD`, which no single node can report about itself.
+
+The plugin is optional, so its absence is silence rather than a gap: unlike a
+missing grant, nothing was denied, and [`audit/coverage`](#auditcoverage) does
+not count it.
+
 ### `repl/server-id`, `repl/gtid-domain`, `repl/gtid-strict`
 
 - **`repl/server-id`** — two nodes sharing a `server_id` is `BAD`, with or

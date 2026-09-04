@@ -94,14 +94,8 @@ touching this file, or CI will fail.
   transitions, for the window in which a cluster is being repaired.
   <!-- gd: prio=low size=M labels=cli ver=0.12.0 -->
 
-## M3 — Fit the toolchain <!-- ms: target=v0.3.0 phase=later -->
+## M3 — Fit the toolchain <!-- ms: target=v0.3.0 phase=shipped -->
 
-- [ ] **GD-19 — checkfleet module**: emit the same findings under a `galera`
-  module in [checkfleet](https://github.com/Allan-Nava/checkfleet), so a fleet
-  already described there gains the check without a second inventory. **Parked
-  here**: the code lives in that repository, and what this one owes it is the
-  stable `--findings` array it already emits.
-  <!-- gd: prio=high size=M labels=integration -->
 - [x] **GD-20 — Release pipeline**: tag-driven archives for six platforms with
   `SHA256SUMS`, an attestation, the `ghcr.io` image and notes lifted from the
   CHANGELOG. <!-- gd: prio=high size=M labels=release ver=0.3.0 -->
@@ -136,9 +130,6 @@ touching this file, or CI will fail.
 - [x] **GD-21 — Docs site**: `docs/` published with the same POSIX-sh generator
   the sibling tools use, with a dead-link gate in CI.
   <!-- gd: prio=med size=M labels=docs ver=0.9.0 -->
-- [ ] **GD-22 — Percona XtraDB Cluster and MySQL Group Replication**: the first
-  is nearly free, the second is a different model and needs its own checks
-  rather than a rename. <!-- gd: prio=low size=XL labels=check -->
 - [x] **GD-23 — Identity and landing page**: a logo in `assets/`, `INTENT.md`
   as the charter (why the tool exists, what it will never become) and a
   dependency-free GitHub Pages landing page in `site/`, deployed by its own
@@ -295,7 +286,7 @@ told about.
   whether "no findings" meant "nothing is wrong".
   <!-- gd: prio=med size=S labels=output ver=0.6.0 -->
 
-## M7 — Every write path, drawn or not <!-- ms: target=v1.0.0 phase=next -->
+## M7 — Every write path, drawn or not <!-- ms: target=v1.0.0 phase=shipped -->
 
 Everything shipped so far treats the cluster as the only thing writing to
 itself. Real deployments are rarely that tidy: a node is also an async replica,
@@ -321,27 +312,27 @@ cluster cannot see a write path it is not part of.
   not on the appliers writes rows on one node and not the others — divergence
   produced by design, certified by nothing, invisible to every counter.
   <!-- gd: prio=high size=S labels=check ver=0.11.0 -->
-- [ ] **GD-49 — Who is actually writing**: `wsrep_replicated` per node over the
+- [x] **GD-49 — Who is actually writing**: `wsrep_replicated` per node over the
   interval (needs `--state`). "We only write to one node" is a belief, and the
   cluster has the numbers to confirm or refute it — a second writer nobody
   meant to have is the cause behind half the certification failures this tool
-  already reports. <!-- gd: prio=med size=M labels=check -->
-- [ ] **GD-51 — The binary log, per node**: `log_bin`, `binlog_format` and
+  already reports. <!-- gd: prio=med size=M labels=check ver=1.0.0 -->
+- [x] **GD-51 — The binary log, per node**: `log_bin`, `binlog_format` and
   `log_slave_updates` compared. Galera does not need the binlog and everything
   around a cluster does: a node with it off is a node no backup and no
   downstream replica can be taken from, and finding that out during a failover
-  is finding it out too late. <!-- gd: prio=med size=S labels=check -->
-- [ ] **GD-52 — A node that restarted between runs**: `wsrep_gcomm_uuid`
+  is finding it out too late. <!-- gd: prio=med size=S labels=check ver=1.0.0 -->
+- [x] **GD-52 — A node that restarted between runs**: `wsrep_gcomm_uuid`
   compared with the previous run (needs `--state`). A restart resets every
   counter, which is exactly why the rate checks fall back to *no baseline* —
   and this is the check that says the restart happened rather than leaving it
-  as an unexplained gap. <!-- gd: prio=med size=S labels=check -->
-- [ ] **GD-53 — The membership as the cluster reports it**:
+  as an unexplained gap. <!-- gd: prio=med size=S labels=check ver=1.0.0 -->
+- [x] **GD-53 — The membership as the cluster reports it**:
   `information_schema.WSREP_MEMBERSHIP` where the `wsrep_info` plugin is
   installed, compared with what each node claims about itself. Two independent
   views of the same membership, and a node that believes it is a member while
   the group has not listed it is a state no single node can report.
-  <!-- gd: prio=low size=M labels=collect,check -->
+  <!-- gd: prio=low size=M labels=collect,check ver=1.0.0 -->
 
 ## M8 — Parked, and why <!-- ms: target=v2.0.0 phase=later -->
 
@@ -366,3 +357,20 @@ six months. Each one names the form in which it *would* earn its place.
   counters, so this needs the error log — outside the SQL channel. GD-52 (a
   node that restarted between runs) is the part of it that *is* reachable.
   <!-- gd: prio=med size=L labels=check -->
+- [ ] **GD-19 — checkfleet module**: emit the same findings under a `galera`
+  module in [checkfleet](https://github.com/Allan-Nava/checkfleet), so a fleet
+  already described there gains the check without a second inventory. **Parked
+  here**: the code lives in that repository, and what this one owes it is the
+  stable `--findings` array it already emits.
+  <!-- gd: prio=high size=M labels=integration -->
+
+## M9 — Beyond Galera <!-- ms: target=v2.0.0 phase=later -->
+
+Not a leftover from M3, which was about this repository's own toolchain: this
+is a different replication model, and pointing the existing checks at it would
+be a rename rather than support. It is written down as the milestone it would
+have to be.
+
+- [ ] **GD-22 — Percona XtraDB Cluster and MySQL Group Replication**: the first
+  is nearly free, the second is a different model and needs its own checks
+  rather than a rename. <!-- gd: prio=low size=XL labels=check -->

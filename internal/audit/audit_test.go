@@ -42,6 +42,9 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			"wsrep_replicated":             "1000",
 			"wsrep_replicated_bytes":       "1048576",
 			"uptime":                       "86400",
+			// A new one on every boot: this is how a restart between two runs
+			// becomes a fact rather than an unexplained missing baseline.
+			"wsrep_gcomm_uuid": "aaaa1111-" + name,
 		},
 		Vars: map[string]string{
 			"version":                "10.11.8-MariaDB",
@@ -62,6 +65,8 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			// Everything that decides what leaves the cluster, or what a
 			// trigger does when a writeset lands.
 			"log_bin":                  "ON",
+			"binlog_format":            "ROW",
+			"log_slave_updates":        "ON",
 			"gtid_domain_id":           "1",
 			"gtid_strict_mode":         "ON",
 			"wsrep_slave_run_triggers": "OFF",
@@ -93,6 +98,25 @@ func dataBytes(n int64) *int64 { return &n }
 
 func threeHealthy() []cluster.Snapshot {
 	return []cluster.Snapshot{healthy("sg-01", now), healthy("cl-02", now), healthy("ov-03", now)}
+}
+
+// baseline is the previous run of the fixture, taken `ago` before now.
+//
+// state.New stamps each node's time from the *snapshot*, so building a
+// baseline out of the same snapshots gives a zero-length interval and every
+// rate check correctly refuses to grade it. The tests that mean "ten minutes
+// have passed" have to say so here.
+func baseline(snaps []cluster.Snapshot, ago time.Duration) *state.State {
+	st := state.New(snaps, now.Add(-ago))
+	st.At = now.Add(-ago)
+	for node, ns := range st.Nodes {
+		ns.At = now.Add(-ago)
+		if ns.Uptime > ago.Seconds() {
+			ns.Uptime -= ago.Seconds()
+		}
+		st.Nodes[node] = ns
+	}
+	return &st
 }
 
 func opts() Options {
@@ -1895,5 +1919,281 @@ func TestAnUnreadReplicaStatusIsNotGraded(t *testing.T) {
 	f := one(t, rep, "audit/coverage")
 	if !strings.Contains(f.Message, "replication status") {
 		t.Fatalf("coverage has to say the replication status was not read: %q", f.Message)
+	}
+}
+
+// GD-51 — the binary log, per node.
+//
+// Galera does not need the binlog and everything *around* a cluster does: a
+// backup, a downstream replica, a point-in-time recovery. A node with it off
+// is a node none of those can be taken from, and a failover is when people
+// find out.
+func TestANodeWithoutABinlogIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["log_bin"] = "OFF"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/binlog")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "ov-03") {
+		t.Fatalf("the node without one must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "backup") {
+		t.Fatalf("the hint has to say what cannot be taken from it: %q", f.Hint)
+	}
+}
+
+func TestDisagreeingBinlogFormatsAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["binlog_format"] = "STATEMENT"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/binlog-format")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "sg-01") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// Galera's own documentation requires ROW. A cluster that agrees on something
+// else agrees on something unsupported, which is worth one line.
+func TestAUniformlyWrongBinlogFormatIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["binlog_format"] = "MIXED"
+	}
+	f := one(t, Run(snaps, nil, opts()), "node/binlog-format")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "MIXED") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// A node that does not log what it applies cannot be the source of a
+// downstream replica: failing over to it breaks that replica silently.
+func TestDisagreeingLogSlaveUpdatesIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["log_slave_updates"] = "OFF"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/binlog-updates")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func TestAUniformBinlogSetupIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	for _, check := range []string{"node/binlog", "node/binlog-format", "node/binlog-updates"} {
+		if fs := byCheck(t, rep, check); len(fs) != 0 {
+			t.Fatalf("%s fired on a uniform setup: %+v", check, fs)
+		}
+	}
+}
+
+// GD-49 — who is actually writing.
+//
+// "We only write to one node" is a belief. The cluster has the numbers, and a
+// second writer nobody meant to have is the cause behind half the
+// certification failures this tool already reports.
+func TestASecondWriterIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	prev := baseline(snaps, 10*time.Minute)
+	// sg-01 originated 5000 writesets in the interval, cl-02 another 3000.
+	snaps[0].Status["wsrep_replicated"] = "6000"
+	snaps[1].Status["wsrep_replicated"] = "4000"
+	rep := Run(snaps, prev, opts())
+
+	f := one(t, rep, "repl/writers")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "sg-01") || !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("both writers must be named with their share: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "certification") {
+		t.Fatalf("the hint has to connect it to the conflicts it causes: %q", f.Hint)
+	}
+}
+
+func TestASingleWriterIsOK(t *testing.T) {
+	snaps := threeHealthy()
+	prev := baseline(snaps, 10*time.Minute)
+	snaps[0].Status["wsrep_replicated"] = "6000"
+	f := one(t, Run(snaps, prev, opts()), "repl/writers")
+	if f.Status != finding.OK || !strings.Contains(f.Message, "sg-01") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// An idle cluster is a fact, not a fault, and not a writer either.
+func TestNoWritesInTheIntervalIsOK(t *testing.T) {
+	snaps := threeHealthy()
+	prev := baseline(snaps, 10*time.Minute)
+	f := one(t, Run(snaps, prev, opts()), "repl/writers")
+	if f.Status != finding.OK {
+		t.Fatalf("status = %s, want OK: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "no writes") {
+		t.Fatalf("say so rather than inventing a writer: %q", f.Message)
+	}
+}
+
+// Without a baseline this is a lifetime total, which says who has written since
+// each node last restarted — a different question. Say so and do not grade it.
+func TestWritersWithoutABaselineIsNotGraded(t *testing.T) {
+	f := one(t, Run(threeHealthy(), nil, opts()), "repl/writers")
+	if f.Status != finding.OK {
+		t.Fatalf("status = %s, want OK: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "not graded") {
+		t.Fatalf("an ungraded lifetime total has to say so: %q", f.Message)
+	}
+}
+
+// GD-52 — a node that restarted between runs.
+//
+// A restart resets every counter, which is why the rate checks fall back to
+// "no baseline". This is the check that says the restart happened instead of
+// leaving that as an unexplained gap.
+func TestARestartBetweenRunsIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	prev := baseline(snaps, 10*time.Minute)
+	// A new boot: new gcomm uuid, uptime back to nothing, counters reset.
+	snaps[2].Status["wsrep_gcomm_uuid"] = "bbbb2222-ov-03"
+	snaps[2].Status["uptime"] = "45"
+	snaps[2].Status["wsrep_replicated"] = "3"
+	rep := Run(snaps, prev, opts())
+
+	f := one(t, rep, "node/restarted")
+	if f.Status != finding.WARN || f.Target != "ov-03" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Hint, "no baseline") {
+		t.Fatalf("the hint has to explain the ungraded checks in the same report: %q", f.Hint)
+	}
+}
+
+// A shrinking uptime is the same event on a build that does not report the
+// uuid: the check has two signals and needs either.
+func TestARestartIsFoundFromUptimeAlone(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Status, "wsrep_gcomm_uuid")
+	}
+	prev := baseline(snaps, 10*time.Minute)
+	snaps[0].Status["uptime"] = "12"
+	rep := Run(snaps, prev, opts())
+	f := one(t, rep, "node/restarted")
+	if f.Status != finding.WARN || f.Target != "sg-01" {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func TestNoRestartIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	prev := baseline(snaps, 10*time.Minute)
+	rep := Run(snaps, prev, opts())
+	if fs := byCheck(t, rep, "node/restarted"); len(fs) != 0 {
+		t.Fatalf("nobody restarted: %+v", fs)
+	}
+}
+
+// A state file written before this check existed carries no uuid, and that is
+// unambiguous: nothing to compare, so nothing to say. It does not need the
+// format version to move, because an absent uuid cannot be mistaken for a
+// different one.
+func TestARestartIsNotInventedWithoutAPreviousUUID(t *testing.T) {
+	snaps := threeHealthy()
+	prev := baseline(snaps, 10*time.Minute)
+	for node := range prev.Nodes {
+		ns := prev.Nodes[node]
+		ns.GcommUUID = ""
+		prev.Nodes[node] = ns
+	}
+	rep := Run(snaps, prev, opts())
+	if fs := byCheck(t, rep, "node/restarted"); len(fs) != 0 {
+		t.Fatalf("an older state file must not report every node as restarted: %+v", fs)
+	}
+}
+
+// GD-53 — the membership as the cluster reports it.
+//
+// Every membership check so far compares what each node says about *itself*.
+// information_schema.WSREP_MEMBERSHIP is the group's own list, so with it
+// there are two independent views of one membership — and a node that believes
+// it is a member while the group has not listed it is a state no single node
+// can report.
+func TestAMemberTheRunDidNotAuditIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Membership = []cluster.Member{
+			{Name: "sg-01"}, {Name: "cl-02"}, {Name: "ov-03"}, {Name: "dr-04"},
+		}
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "cluster/membership-view")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "dr-04") {
+		t.Fatalf("the member nobody audited must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "without them") {
+		t.Fatalf("the hint has to say every statement above was made without them: %q", f.Hint)
+	}
+}
+
+// The other direction: this node is Synced and the group has not listed it.
+func TestANodeTheGroupDoesNotListIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Membership = []cluster.Member{{Name: "sg-01"}, {Name: "cl-02"}}
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "cluster/membership-view")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "ov-03") {
+		t.Fatalf("the node the group does not list must be named: %q", f.Message)
+	}
+}
+
+// Members are matched on every spelling a node answers to, exactly as the
+// proxy's server list is: the plugin reports wsrep_node_name, which is not
+// necessarily what this run called the node.
+func TestAMemberNamedByAddressIsMatched(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_node_address"] = "10.11.1.5"
+	for i := range snaps {
+		snaps[i].Membership = []cluster.Member{
+			{Name: "10.11.1.5:4567"}, {Name: "cl-02"}, {Name: "ov-03"},
+		}
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "cluster/membership-view"); len(fs) != 0 {
+		t.Fatalf("a member named by address is the same member: %+v", fs)
+	}
+}
+
+func TestTwoViewsThatAgreeAreQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Membership = []cluster.Member{{Name: "sg-01"}, {Name: "cl-02"}, {Name: "ov-03"}}
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "cluster/membership-view"); len(fs) != 0 {
+		t.Fatalf("the two views agree: %+v", fs)
+	}
+}
+
+// The plugin is optional. Its absence is not a gap in the audit — unlike a
+// missing grant — so it is not graded and not reported as coverage.
+func TestNoMembershipViewIsNotAGap(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "cluster/membership-view"); len(fs) != 0 {
+		t.Fatalf("without the plugin there is nothing to compare: %+v", fs)
+	}
+	f := one(t, rep, "audit/coverage")
+	if strings.Contains(f.Message, "membership") {
+		t.Fatalf("an optional plugin that is not installed is not a gap: %q", f.Message)
 	}
 }

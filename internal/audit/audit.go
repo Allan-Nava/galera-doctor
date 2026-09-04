@@ -164,6 +164,10 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(serverIdentity(rep.Cluster, live)...)
 	add(applierTriggers(rep.Cluster, live)...)
 	add(asyncReplication(live)...)
+	add(binlog(rep.Cluster, live)...)
+	add(writers(rep.Cluster, live, prev, rep.State)...)
+	add(restarted(live, prev, rep.State)...)
+	add(membershipView(rep.Cluster, live)...)
 	add(coverage(rep.Cluster, snaps, live, prev)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
@@ -2107,6 +2111,324 @@ func asyncReplication(live []cluster.Snapshot) []finding.Finding {
 			Message: fmt.Sprintf("%d replica(s) read from this node: %s", len(hosts), strings.Join(hosts, ", ")),
 			Value:   finding.Num(float64(len(hosts))), Unit: "replicas",
 			Hint: "a dependency the rest of the cluster knows nothing about: the next SST rebuilds this node's binary logs out from under them, and so does anything that reinitialises it",
+		})
+	}
+	return out
+}
+
+// binlog reports what the cluster cannot be used for (GD-51).
+//
+// Galera does not need the binary log: it replicates by writeset. Everything
+// *around* a cluster needs it — a backup, a downstream replica, a
+// point-in-time recovery — so a node with it off is a node none of those can
+// be taken from, and a failover is when people find that out. Same for
+// log_slave_updates: a node that does not log what it applies cannot be the
+// source of a downstream replica, however healthy it looks.
+func binlog(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+
+	var off []string
+	reporting := 0
+	for _, s := range live {
+		on, ok := s.Bool("log_bin")
+		if !ok {
+			continue
+		}
+		reporting++
+		if !on {
+			off = append(off, s.Node)
+		}
+	}
+	if len(off) > 0 && len(off) < reporting {
+		sort.Strings(off)
+		out = append(out, finding.Finding{
+			Check: "node/binlog", Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("log_bin is off on %s, and on elsewhere", strings.Join(off, ", ")),
+			Hint:    "no backup, no downstream replica and no point-in-time recovery can be taken from those nodes — which is discovered during a failover, when they are the ones left",
+		})
+	}
+
+	// Galera requires ROW. A cluster that agrees on something else agrees on
+	// something unsupported.
+	var formats []cluster.Snapshot
+	for _, s := range live {
+		if v, ok := s.Var("binlog_format"); ok && strings.TrimSpace(v) != "" {
+			formats = append(formats, s)
+		}
+	}
+	if len(formats) > 0 {
+		groups := groupBy(formats, func(s cluster.Snapshot) string {
+			v, _ := s.Var("binlog_format")
+			return strings.ToUpper(strings.TrimSpace(v))
+		})
+		switch {
+		case len(groups) > 1:
+			out = append(out, finding.Finding{
+				Check: "node/binlog-format", Target: name, Status: finding.WARN,
+				Message: "nodes disagree about binlog_format: " + describeGroups(groups),
+				Hint:    "Galera requires ROW; anything else is unsupported for replication here, and it changes what a downstream replica receives depending on which node it reads from",
+			})
+		default:
+			for format := range groups {
+				if format == "ROW" {
+					break
+				}
+				out = append(out, finding.Finding{
+					Check: "node/binlog-format", Target: name, Status: finding.WARN,
+					Message: fmt.Sprintf("binlog_format is %s on all %d node(s)", format, len(formats)),
+					Hint:    "Galera requires ROW — the nodes agree, and they agree on something its own documentation calls unsupported",
+				})
+			}
+		}
+	}
+
+	// Only worth saying when there is a binary log to write into.
+	anyBinlog := false
+	for _, s := range live {
+		if on, ok := s.Bool("log_bin"); ok && on {
+			anyBinlog = true
+			break
+		}
+	}
+	if anyBinlog {
+		var updates []cluster.Snapshot
+		for _, s := range live {
+			if _, ok := s.Var("log_slave_updates"); ok {
+				updates = append(updates, s)
+			}
+		}
+		if len(updates) > 1 {
+			groups := groupBy(updates, func(s cluster.Snapshot) string {
+				v, _ := s.Var("log_slave_updates")
+				return strings.ToUpper(strings.TrimSpace(v))
+			})
+			if len(groups) > 1 {
+				out = append(out, finding.Finding{
+					Check: "node/binlog-updates", Target: name, Status: finding.WARN,
+					Message: "nodes disagree about log_slave_updates: " + describeGroups(groups),
+					Hint:    "a node that does not log the writesets it applies cannot be the source of a downstream replica: failing over to it breaks that replica silently, and nothing in the cluster notices",
+				})
+			}
+		}
+	}
+	return out
+}
+
+// writers reports who is actually writing (GD-49).
+//
+// "We only write to one node" is a belief, and the cluster has the numbers:
+// wsrep_replicated counts the writesets each node *originated*. A second
+// writer nobody meant to have is the cause behind half the certification
+// failures repl/cert-failures reports, and it is invisible in any per-node
+// dashboard, because each node looks busy in its own right.
+//
+// A lifetime total answers a different question — who has written since each
+// node last restarted — so without a baseline this says so and does not grade.
+func writers(name string, live []cluster.Snapshot, prev *state.State, now state.State) []finding.Finding {
+	type share struct {
+		node  string
+		count float64
+	}
+	var shares []share
+	var total float64
+	graded := true
+	for _, s := range live {
+		ns, ok := now.Nodes[s.Node]
+		if !ok {
+			continue
+		}
+		if d, ok := prev.Since(s.Node, "wsrep_replicated", ns); ok {
+			shares = append(shares, share{node: s.Node, count: d.Value})
+			total += d.Value
+			continue
+		}
+		graded = false
+		if v, ok := s.Float("wsrep_replicated"); ok {
+			shares = append(shares, share{node: s.Node, count: v})
+			total += v
+		}
+	}
+	if len(shares) == 0 {
+		return nil
+	}
+	sort.SliceStable(shares, func(i, j int) bool { return shares[i].count > shares[j].count })
+
+	if !graded {
+		return []finding.Finding{{
+			Check: "repl/writers", Target: name, Status: finding.OK,
+			Message: fmt.Sprintf("%s has originated the most writesets since its last restart (not graded: no baseline)", shares[0].node),
+			Hint:    "run again with --state: over an interval this says who is writing *now*, which is the question — a lifetime total says who wrote since each node last came up",
+		}}
+	}
+	if total == 0 {
+		return []finding.Finding{{
+			Check: "repl/writers", Target: name, Status: finding.OK,
+			Message: "no writes replicated in the interval",
+			Value:   finding.Num(0), Unit: "writesets",
+		}}
+	}
+
+	// A share this small is a heartbeat, a schema tool, or a stray connection
+	// — not a second writer, and grading it would make every cluster look
+	// multi-writer.
+	const minShare = 0.02
+	var writing []string
+	for _, sh := range shares {
+		if sh.count/total < minShare {
+			continue
+		}
+		writing = append(writing, fmt.Sprintf("%s %.0f%%", sh.node, 100*sh.count/total))
+	}
+	if len(writing) < 2 {
+		return []finding.Finding{{
+			Check: "repl/writers", Target: name, Status: finding.OK,
+			Message: fmt.Sprintf("writes arrive on %s (%.0f%% of %s writesets in the interval)",
+				shares[0].node, 100*shares[0].count/total, trimFloat(total)),
+			Value: finding.Num(total), Unit: "writesets",
+		}}
+	}
+	return []finding.Finding{{
+		Check: "repl/writers", Target: name, Status: finding.WARN,
+		Message: fmt.Sprintf("writes arrive on %d nodes: %s (%s writesets in the interval)",
+			len(writing), strings.Join(writing, ", "), trimFloat(total)),
+		Value: finding.Num(float64(len(writing))), Unit: "nodes",
+		Hint: "if this cluster is meant to have one writer, something is bypassing that — and writing to several nodes is where certification conflicts come from, so this is the cause behind a repl/cert-failures finding rather than another symptom",
+	}}
+}
+
+// restarted reports a node that came back between two runs (GD-52).
+//
+// A restart resets every counter, which is exactly why the rate checks fall
+// back to "no baseline" — and that fallback, on its own, looks like a tool
+// being coy. This says what happened: wsrep_gcomm_uuid is a new value on every
+// boot, and an uptime shorter than it was is the same event on a build that
+// does not report the uuid.
+func restarted(live []cluster.Snapshot, prev *state.State, now state.State) []finding.Finding {
+	if prev == nil || prev.Version != state.Version {
+		return nil
+	}
+	var out []finding.Finding
+	for _, s := range live {
+		before, ok := prev.Nodes[s.Node]
+		if !ok {
+			continue
+		}
+		current, ok := now.Nodes[s.Node]
+		if !ok {
+			continue
+		}
+
+		var why string
+		switch {
+		// An absent uuid on either side is "nothing to compare", never a
+		// change: an older state file must not report every node as
+		// restarted.
+		case before.GcommUUID != "" && current.GcommUUID != "" && before.GcommUUID != current.GcommUUID:
+			why = "its group communication UUID changed"
+		case before.Uptime > 0 && current.Uptime > 0 && current.Uptime < before.Uptime:
+			why = fmt.Sprintf("its uptime went from %s to %s",
+				(time.Duration(before.Uptime) * time.Second).String(),
+				(time.Duration(current.Uptime) * time.Second).String())
+		default:
+			continue
+		}
+		out = append(out, finding.Finding{
+			Check: "node/restarted", Target: s.Node, Status: finding.WARN,
+			Message: "this node restarted since the previous run: " + why,
+			Hint:    "every counter on it started again from zero, which is why the rate checks above report no baseline for it — and if nobody planned this restart, that is the finding rather than the rates",
+		})
+	}
+	return out
+}
+
+// membershipView compares the group's own list of members with the nodes this
+// run audited (GD-53).
+//
+// Every other membership check reads what each node says about *itself*:
+// wsrep_cluster_size, wsrep_cluster_conf_id, wsrep_cluster_status. The
+// wsrep_info plugin exposes the group's list, which makes two independent
+// views of one membership — and the interesting states live only in the
+// comparison. A member the group lists that this run never read is a node
+// every cluster-wide statement above was made without; a node that is Synced
+// and green while the group has not listed it is a state no single node can
+// report about itself.
+//
+// The plugin is optional, so its absence is silence rather than a gap: unlike
+// a missing grant, nothing was denied.
+func membershipView(name string, live []cluster.Snapshot) []finding.Finding {
+	// The group's list, from whichever nodes can see it, de-duplicated.
+	seen := map[string]cluster.Member{}
+	for _, s := range live {
+		for _, m := range s.Membership {
+			key := strings.ToLower(cluster.HostOnly(m.Name))
+			if key == "" {
+				key = strings.ToLower(m.UUID)
+			}
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; !ok {
+				seen[key] = m
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+
+	// Every spelling each audited node answers to, exactly as the proxy's
+	// server list is matched: the plugin reports what a node calls itself.
+	audited := map[string]string{}
+	for _, s := range live {
+		for _, a := range s.Addresses() {
+			audited[strings.ToLower(cluster.HostOnly(a))] = s.Node
+		}
+	}
+
+	var unknown []string
+	for key, m := range seen {
+		if _, ok := audited[key]; ok {
+			continue
+		}
+		label := m.Name
+		if label == "" {
+			label = m.UUID
+		}
+		unknown = append(unknown, label)
+	}
+	sort.Strings(unknown)
+
+	var unlisted []string
+	for _, s := range live {
+		found := false
+		for _, a := range s.Addresses() {
+			if _, ok := seen[strings.ToLower(cluster.HostOnly(a))]; ok {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unlisted = append(unlisted, s.Node)
+		}
+	}
+	sort.Strings(unlisted)
+
+	var out []finding.Finding
+	if len(unlisted) > 0 {
+		out = append(out, finding.Finding{
+			Check: "cluster/membership-view", Target: name, Status: finding.BAD,
+			Message: fmt.Sprintf("the cluster does not list %s, which reported itself as a member",
+				strings.Join(unlisted, ", ")),
+			Hint: "the node believes it is in the group and the group has not listed it — no single node can report this about itself, and writes it accepts are certified by a component it is not part of",
+		})
+	}
+	if len(unknown) > 0 {
+		out = append(out, finding.Finding{
+			Check: "cluster/membership-view", Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("the cluster lists %d member(s) this run did not audit: %s",
+				len(unknown), strings.Join(unknown, ", ")),
+			Value: finding.Num(float64(len(unknown))), Unit: "nodes",
+			Hint: "every cluster-wide statement in this report was made without them: add them to the config, or find out what they are — a member nobody knows about is a member nobody is watching",
 		})
 	}
 	return out

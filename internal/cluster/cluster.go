@@ -59,6 +59,12 @@ type Snapshot struct {
 	// TablesNoPK lists application tables without a primary key. Galera's
 	// row-based certification needs one.
 	TablesNoPK []string `json:"tables_no_pk,omitempty"`
+	// Membership is the group's own view of who is in it, from
+	// information_schema.WSREP_MEMBERSHIP where the wsrep_info plugin is
+	// installed. nil means there is no such view — the plugin is optional, so
+	// its absence is not a gap in the audit and is not reported as one
+	// (GD-53).
+	Membership []Member `json:"membership,omitempty"`
 	// Replicas is the async replication this node consumes: one entry per
 	// source, because a server can have several named connections. nil means
 	// the status was not read; an empty slice means it was read and there is
@@ -84,6 +90,16 @@ type Snapshot struct {
 	// then rests on fewer nodes than it claims, so the audit reports it as an
 	// ERROR rather than skipping the node quietly.
 	Err string `json:"error,omitempty"`
+}
+
+// Member is one row of the group's own membership view. Name is whatever the
+// node calls itself there, which is not necessarily what this run called it —
+// so it is matched the same way a proxy's server list is.
+type Member struct {
+	Index string `json:"index,omitempty"`
+	UUID  string `json:"uuid,omitempty"`
+	Name  string `json:"name"`
+	Addr  string `json:"address,omitempty"`
 }
 
 // ReplicaLink is one async replication connection into this node.

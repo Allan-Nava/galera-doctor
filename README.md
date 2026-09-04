@@ -34,6 +34,7 @@ These are the states this tool exists for:
 | **A split brain that is already configured** | `pc.ignore_sb` left on after somebody recovered a cluster by hand, or quorum weights that are not one vote per node. Nothing is exercised until the network moves — and then both sides stay writable. |
 | **Tables Galera does not replicate at all** | A MyISAM or Aria table in an application schema. The write succeeds, nothing certifies it, no counter records it, and the rows exist on exactly one node. |
 | **Durability that is not the cluster's** | A cluster's durability is its weakest node's, not its average. One node acknowledging a commit before its log reaches the disk turns "committed on three nodes" into something else — and each node is doing exactly what it was told, so nothing reports it. |
+| **A second writer nobody meant to have** | "We only write to one node" is a belief; `wsrep_replicated` per node over an interval is the answer. Every node looks busy in its own right, so no per-node dashboard shows it — and writing to two nodes is where certification conflicts come from. |
 | **A write path nobody drew** | A cluster is drawn as three nodes replicating to each other. It does not show the member that is also an async replica of a legacy server, or the one feeding a reporting replica downstream — and the cluster cannot see a write path it is not part of. |
 | **Slow, or simply far away** | A deep send queue says nothing about the cause: a node across a WAN link is doing what physics allows, and a node with a failing disk in the same rack looks identical from there. `wsrep_evs_repl_latency` and the segment map together say which one it is. |
 | **A node that cannot find its cluster** | `wsrep_cluster_address` is only read at startup. A list naming two decommissioned servers — or an empty `gcomm://` left behind after a bootstrap — belongs to a node that is Synced and green today and forms its own cluster tomorrow. |
@@ -110,6 +111,11 @@ repl/async-in, repl/async-out              async replication into or out of a cl
 repl/server-id                             nodes sharing a server_id
 repl/gtid-domain, repl/gtid-strict         what a failover does to a downstream replica
 repl/triggers                              triggers that run on the appliers of one node only
+repl/writers                               who is actually writing, over the interval (needs --state)
+node/binlog, node/binlog-format            what the cluster cannot be used for: backups, downstream replicas
+node/binlog-updates                        a node no downstream replica can be moved to
+node/restarted                             a node that came back between two runs (needs --state)
+cluster/membership-view                    the group's own member list against the nodes audited
 audit/changes                              what appeared, cleared or got worse since the last run (needs --state)
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
 proxysql/monitor                           a proxy whose Galera monitor stopped: the hostgroups are a photograph

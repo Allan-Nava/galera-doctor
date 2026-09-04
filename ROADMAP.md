@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**56 items · 48 shipped · 8 open · 8 milestones.**
+**56 items · 52 shipped · 4 open · 9 milestones.**
 
 ## At a glance
 
@@ -14,21 +14,19 @@
 |---|---|---|---|---|---|
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
 | **M2** — Deeper into the cluster | `v0.2.0` | shipped | `##########` 100% | 0 | 4 |
-| **M3** — Fit the toolchain | `v0.3.0` | later | `########..` 80% | 2 | 8 |
+| **M3** — Fit the toolchain | `v0.3.0` | shipped | `##########` 100% | 0 | 8 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | shipped | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
-| **M7** — Every write path, drawn or not | `v1.0.0` | next | `####......` 43% | 4 | 3 |
-| **M8** — Parked, and why | `v2.0.0` | later | `..........` 0% | 2 | 0 |
+| **M7** — Every write path, drawn or not | `v1.0.0` | shipped | `##########` 100% | 0 | 7 |
+| **M8** — Parked, and why | `v2.0.0` | later | `..........` 0% | 3 | 0 |
+| **M9** — Beyond Galera | `v2.0.0` | later | `..........` 0% | 1 | 0 |
 
 ## Next up
 
 The open items with the highest priority in the milestones that are in flight.
 
-- **GD-49** — Who is actually writing · `med` · size `M` · check (M7, target `v1.0.0`)
-- **GD-51** — The binary log, per node · `med` · size `S` · check (M7, target `v1.0.0`)
-- **GD-52** — A node that restarted between runs · `med` · size `S` · check (M7, target `v1.0.0`)
-- **GD-53** — The membership as the cluster reports it · `low` · size `M` · collect,check (M7, target `v1.0.0`)
+_Nothing in flight._
 
 ## Milestones
 
@@ -64,12 +62,10 @@ Target `v0.2.0` · shipped · 0 open · 4 shipped · `##########` 100%
 
 ### M3 — Fit the toolchain
 
-Target `v0.3.0` · later · 2 open · 8 shipped · `########..` 80%
+Target `v0.3.0` · shipped · 0 open · 8 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-19** — checkfleet module | high | M | integration | open |
-| **GD-22** — Percona XtraDB Cluster and MySQL Group Replication | low | XL | check | open |
 | **GD-20** — Release pipeline | high | M | release | shipped `0.3.0` |
 | **GD-54** — Nothing ever installed the formula | high | S | release,tests | shipped `0.9.1` |
 | **GD-55** — goreleaser and a cask, like the sibling tools | high | M | release,delivery | shipped `0.10.0` |
@@ -123,35 +119,44 @@ Target `v0.6.0` · shipped · 0 open · 6 shipped · `##########` 100%
 
 ### M7 — Every write path, drawn or not
 
-Target `v1.0.0` · next · 4 open · 3 shipped · `####......` 43%
+Target `v1.0.0` · shipped · 0 open · 7 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-49** — Who is actually writing | med | M | check | open |
-| **GD-51** — The binary log, per node | med | S | check | open |
-| **GD-52** — A node that restarted between runs | med | S | check | open |
-| **GD-53** — The membership as the cluster reports it | low | M | collect,check | open |
 | **GD-47** — Async replication attached to the cluster | high | M | collect,check | shipped `0.11.0` |
 | **GD-48** — GTID domains that do not agree | high | S | check | shipped `0.11.0` |
 | **GD-50** — Triggers that run on one node only | high | S | check | shipped `0.11.0` |
+| **GD-49** — Who is actually writing | med | M | check | shipped `1.0.0` |
+| **GD-51** — The binary log, per node | med | S | check | shipped `1.0.0` |
+| **GD-52** — A node that restarted between runs | med | S | check | shipped `1.0.0` |
+| **GD-53** — The membership as the cluster reports it | low | M | collect,check | shipped `1.0.0` |
 
 ### M8 — Parked, and why
 
-Target `v2.0.0` · later · 2 open · 0 shipped · `..........` 0%
+Target `v2.0.0` · later · 3 open · 0 shipped · `..........` 0%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
 | **GD-14** — Backup freshness | high | M | check | open |
+| **GD-19** — checkfleet module | high | M | integration | open |
 | **GD-15** — SST/IST history | med | L | check | open |
+
+### M9 — Beyond Galera
+
+Target `v2.0.0` · later · 1 open · 0 shipped · `..........` 0%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-22** — Percona XtraDB Cluster and MySQL Group Replication | low | XL | check | open |
 
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 34 | 7 |
-| `collect` | 4 | 1 |
+| `check` | 34 | 3 |
 | `integration` | 1 | 1 |
 | `cli` | 2 | 0 |
+| `collect` | 4 | 0 |
 | `delivery` | 2 | 0 |
 | `docs` | 4 | 0 |
 | `output` | 3 | 0 |

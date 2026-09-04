@@ -149,6 +149,14 @@ func (c Collector) Collect(ctx context.Context, n Node) Snapshot {
 		snap.ReplicaHosts = nil
 		_ = err
 	}
+
+	// The group's own membership view, where the wsrep_info plugin is
+	// installed (GD-53). Optional: nil is "there is no such view", which is
+	// not a gap in the audit and is not reported as one.
+	if snap.Membership, err = membershipView(ctx, db); err != nil {
+		snap.Membership = nil
+		_ = err
+	}
 	return snap
 }
 
@@ -554,6 +562,60 @@ func replicaHosts(ctx context.Context, db *sql.DB) ([]string, error) {
 		out = append(out, host)
 	}
 	return out, rows.Err()
+}
+
+// membershipView reads information_schema.WSREP_MEMBERSHIP: the group's own
+// list of who is in it (GD-53).
+//
+// The table only exists where the wsrep_info plugin is installed, so a failure
+// here is the normal case on most clusters and means "no second view", never
+// "no membership". Columns are read by name because the plugin has changed
+// them between versions.
+func membershipView(ctx context.Context, db *sql.DB) ([]Member, error) {
+	rows, err := Query(ctx, db, "SELECT * FROM information_schema.WSREP_MEMBERSHIP")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var out []Member
+	for rows.Next() {
+		values := make([]sql.NullString, len(cols))
+		cells := make([]any, len(cols))
+		for i := range cells {
+			cells[i] = &values[i]
+		}
+		if err := rows.Scan(cells...); err != nil {
+			return nil, err
+		}
+		var m Member
+		for i, c := range cols {
+			v := strings.TrimSpace(values[i].String)
+			switch strings.ToLower(c) {
+			case "index":
+				m.Index = v
+			case "uuid":
+				m.UUID = v
+			case "name":
+				m.Name = v
+			case "address", "incoming_address":
+				if m.Addr == "" {
+					m.Addr = v
+				}
+			}
+		}
+		if m.Name == "" && m.UUID == "" {
+			continue
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // redact keeps a DSN — and therefore a password — out of an error message. A

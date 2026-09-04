@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Allan-Nava/galera-doctor/internal/cluster"
@@ -47,9 +48,18 @@ var Counters = []string{
 
 // NodeState is one node's counters at one moment.
 type NodeState struct {
-	At       time.Time          `json:"at"`
-	Uptime   float64            `json:"uptime_seconds"`
-	Counters map[string]float64 `json:"counters"`
+	At     time.Time `json:"at"`
+	Uptime float64   `json:"uptime_seconds"`
+	// GcommUUID is wsrep_gcomm_uuid: a new value on every boot, which is how a
+	// restart between two runs becomes a fact rather than an unexplained
+	// missing baseline (GD-52).
+	//
+	// Unlike Findings, this one did not need the format version to move: an
+	// absent uuid means "nothing to compare", which cannot be mistaken for a
+	// different one, so an older file simply produces no finding. A version
+	// bump would have thrown away everybody's baseline to gain nothing.
+	GcommUUID string             `json:"gcomm_uuid,omitempty"`
+	Counters  map[string]float64 `json:"counters"`
 }
 
 // State is the previous run.
@@ -75,6 +85,9 @@ func New(snaps []cluster.Snapshot, now time.Time) State {
 		ns := NodeState{At: s.At, Counters: map[string]float64{}}
 		if up, ok := s.Float("uptime"); ok {
 			ns.Uptime = up
+		}
+		if uuid, ok := s.Get("wsrep_gcomm_uuid"); ok {
+			ns.GcommUUID = strings.TrimSpace(uuid)
 		}
 		for _, key := range Counters {
 			if v, ok := s.Float(key); ok {
