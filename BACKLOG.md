@@ -231,7 +231,7 @@ asked to behave as one thing.
   node is doing exactly what it was told.
   <!-- gd: prio=med size=S labels=check ver=0.5.0 -->
 
-## M6 — Configured, and not running <!-- ms: target=v0.6.0 phase=next -->
+## M6 — Configured, and not running <!-- ms: target=v0.6.0 phase=shipped -->
 
 Everything shipped so far compares nodes with each other. This milestone
 compares what a node is *configured to believe* with what is actually there:
@@ -241,33 +241,33 @@ describes a cluster which no longer exists is the quietest failure in the set �
 it costs nothing until the process restarts and looks for the cluster it was
 told about.
 
-- [ ] **GD-38 — The peer list against the membership**: `wsrep_cluster_address`
+- [x] **GD-38 — The peer list against the membership**: `wsrep_cluster_address`
   per node, resolved against the nodes actually in the component. A node whose
   list names two servers that were decommissioned, or that does not name the
   node that is currently the only other member, starts fine today and cannot
-  find the cluster after a restart. <!-- gd: prio=high size=M labels=check -->
-- [ ] **GD-39 — Flow control that one node decides for everybody**:
+  find the cluster after a restart. <!-- gd: prio=high size=M labels=check ver=0.6.0 -->
+- [x] **GD-39 — Flow control that one node decides for everybody**:
   `gcs.fc_limit`, `gcs.fc_factor` and `gcs.fc_master_slave` per node. The
   cluster throttles when the slowest queue hits its own limit, so a node
   configured with a smaller one paces every writer in the cluster — and
   `flow/paused` reports the symptom without the reason.
-  <!-- gd: prio=high size=S labels=check -->
-- [ ] **GD-40 — Appliers that are not the same size**: `wsrep_slave_threads`
+  <!-- gd: prio=high size=S labels=check ver=0.6.0 -->
+- [x] **GD-40 — Appliers that are not the same size**: `wsrep_slave_threads`
   per node, reported next to that node's receive queue. A node with a quarter
   of its peers' apply threads is slower by configuration rather than by load,
   which is a different fix from "look at its disk".
-  <!-- gd: prio=med size=S labels=check -->
-- [ ] **GD-41 — What a rejoin will actually copy**: the dataset size from
+  <!-- gd: prio=med size=S labels=check ver=0.6.0 -->
+- [x] **GD-41 — What a rejoin will actually copy**: the dataset size from
   `information_schema.TABLES` next to the gcache window and the SST method, so
   "this node needs a full SST" comes with the number of gigabytes that implies
-  and the donor it will take out of service. <!-- gd: prio=med size=M labels=check -->
-- [ ] **GD-42 — A proxy whose monitor stopped**: ProxySQL's Galera monitor
+  and the donor it will take out of service. <!-- gd: prio=med size=M labels=check ver=0.6.0 -->
+- [x] **GD-42 — A proxy whose monitor stopped**: ProxySQL's Galera monitor
   writes the hostgroups this tool already compares. When the monitor is
   disabled or its checks are failing, those hostgroups are a photograph: every
   proxysql/* finding agrees with the cluster and none of it is live.
-  <!-- gd: prio=high size=M labels=proxysql -->
-- [ ] **GD-43 — What this run could not audit**: one finding summarising the
+  <!-- gd: prio=high size=M labels=proxysql ver=0.6.0 -->
+- [x] **GD-43 — What this run could not audit**: one finding summarising the
   checks that did not run and why — a missing grant, a metric this build does
   not have, a node that could not be read. A cron job needs one line to know
   whether "no findings" meant "nothing is wrong".
-  <!-- gd: prio=med size=S labels=output -->
+  <!-- gd: prio=med size=S labels=output ver=0.6.0 -->

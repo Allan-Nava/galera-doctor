@@ -48,6 +48,9 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			"wsrep_sst_donor":  "",
 			"wsrep_sst_auth":   "********",
 			"wsrep_node_name":  name,
+			// What this node is configured to believe about the cluster.
+			"wsrep_cluster_address": "gcomm://sg-01,cl-02,ov-03",
+			"wsrep_slave_threads":   "4",
 			// Limits and durability: uniform in every diagram, per node in
 			// every server.
 			"wsrep_max_ws_size":              "2147483647",
@@ -59,10 +62,16 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 		// A non-nil map is "the application schemas were read"; nil is "they
 		// were not", which is a different finding from "there are none".
 		// The server's own clock, read in the same snapshot.
-		Clock:     at,
+		Clock: at,
+		// What a full state transfer would have to copy.
+		DataBytes: dataBytes(42 * 1024 * 1024 * 1024),
 		AppTables: map[string]string{"app.users": "1111111111111111", "app.events": "2222222222222222"},
 	}
 }
+
+// dataBytes is the pointer the fixture needs: nil means "not read", which is a
+// different statement from "this cluster holds no data".
+func dataBytes(n int64) *int64 { return &n }
 
 func threeHealthy() []cluster.Snapshot {
 	return []cluster.Snapshot{healthy("sg-01", now), healthy("cl-02", now), healthy("ov-03", now)}
@@ -1169,5 +1178,253 @@ func TestNoSegmentsReportedIsNotGraded(t *testing.T) {
 	rep := Run(threeHealthy(), nil, opts())
 	if fs := byCheck(t, rep, "cluster/segments"); len(fs) != 0 {
 		t.Fatalf("an option nobody reported cannot be graded: %+v", fs)
+	}
+}
+
+// GD-38 — the peer list against the membership. A node starts fine today and
+// cannot find the cluster after a restart, because the list it was given
+// describes a cluster that no longer exists.
+func TestAPeerThatIsNotInTheClusterIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_cluster_address"] = "gcomm://sg-01,cl-02,ov-99"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "cluster/peers")
+	if f.Status != finding.WARN || f.Target != "sg-01" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Message, "ov-99") {
+		t.Fatalf("the message must name the peer that is not there: %q", f.Message)
+	}
+}
+
+// A list naming nobody who is currently a member: this node cannot rejoin at
+// all, and nothing says so until it tries.
+func TestAPeerListWithNoCurrentMemberIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["wsrep_cluster_address"] = "gcomm://old-01,old-02"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "cluster/peers")
+	if f.Status != finding.BAD || f.Target != "ov-03" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Hint, "rejoin") {
+		t.Fatalf("the hint has to say what happens at the next restart: %q", f.Hint)
+	}
+}
+
+// An empty gcomm:// is the bootstrap form. Left in a running node's
+// configuration it is a split brain waiting for a restart.
+func TestAnEmptyClusterAddressIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["wsrep_cluster_address"] = "gcomm://"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "cluster/peers")
+	if f.Status != finding.BAD || f.Target != "cl-02" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Message, "bootstrap") && !strings.Contains(f.Hint, "bootstrap") {
+		t.Fatalf("the finding has to say it would bootstrap its own cluster: %+v", f)
+	}
+}
+
+// The list is written by a human: a peer named by address and port is the same
+// peer, and a node that is right there must not be reported as missing.
+func TestPeersNamedByAddressAndPortAreMatched(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_node_address"] = "10.11.1.5"
+	snaps[1].Vars["wsrep_cluster_address"] = "gcomm://10.11.1.5:4567,ov-03"
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "cluster/peers"); len(fs) != 0 {
+		t.Fatalf("a peer named by address and port is in the cluster: %+v", fs)
+	}
+}
+
+func TestAGoodPeerListIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "cluster/peers"); len(fs) != 0 {
+		t.Fatalf("a list that names the cluster is not a finding: %+v", fs)
+	}
+}
+
+func TestAnUnreportedClusterAddressIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Vars, "wsrep_cluster_address")
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "cluster/peers"); len(fs) != 0 {
+		t.Fatalf("a variable nobody reported cannot be graded: %+v", fs)
+	}
+}
+
+// GD-39 — flow control that one node decides for everybody. flow/paused
+// reports the symptom; this is the reason.
+func TestASmallerFlowControlLimitIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["wsrep_provider_options"] = "gcache.size = 512M; gcs.fc_limit = 4;"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "flow/settings")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "ov-03") {
+		t.Fatalf("the node that paces the cluster must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "flow/paused") {
+		t.Fatalf("the hint has to point at the check that reports the symptom: %q", f.Hint)
+	}
+}
+
+func TestEqualFlowControlLimitsAreQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "flow/settings"); len(fs) != 0 {
+		t.Fatalf("equal limits are not a finding: %+v", fs)
+	}
+}
+
+func TestADifferentFlowControlFactorIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_provider_options"] = "gcache.size = 512M; gcs.fc_limit = 16; gcs.fc_factor = 1.0;"
+	}
+	snaps[0].Vars["wsrep_provider_options"] = "gcache.size = 512M; gcs.fc_limit = 16; gcs.fc_factor = 0.5;"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "flow/settings")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "fc_factor") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// GD-40 — appliers that are not the same size. Slower by configuration is a
+// different fix from "look at its disk".
+func TestFewerApplierThreadsAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["wsrep_slave_threads"] = "1"
+	snaps[1].Status["wsrep_local_recv_queue"] = "12"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/appliers")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the node with fewer appliers must be named: %q", f.Message)
+	}
+	// The queue is the reason this matters, so it belongs in the same line.
+	if !strings.Contains(f.Message, "12") {
+		t.Fatalf("the message must carry that node's receive queue: %q", f.Message)
+	}
+}
+
+func TestEqualApplierThreadsAreQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "repl/appliers"); len(fs) != 0 {
+		t.Fatalf("equal applier counts are not a finding: %+v", fs)
+	}
+}
+
+// MariaDB 10.6 renamed the variable and kept the old one as an alias; a build
+// that only reports the new name must still be compared.
+func TestTheNewerApplierThreadsNameIsUnderstood(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Vars, "wsrep_slave_threads")
+		snaps[i].Vars["wsrep_applier_threads"] = "8"
+	}
+	snaps[0].Vars["wsrep_applier_threads"] = "2"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/appliers")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "sg-01") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+// GD-41 — what a rejoin will actually copy. "This node needs a full SST" is
+// not actionable without the number of gigabytes it implies and the donor it
+// takes out of service while it happens.
+func TestTheSSTSizeIsReported(t *testing.T) {
+	f := one(t, Run(threeHealthy(), nil, opts()), "sst/size")
+	if f.Status != finding.OK {
+		t.Fatalf("a size is a number, not a fault: %+v", f)
+	}
+	if !strings.Contains(f.Message, "42") {
+		t.Fatalf("the message must carry the size: %q", f.Message)
+	}
+	if !strings.Contains(f.Message, "mariabackup") {
+		t.Fatalf("the method decides how the copy happens, so it belongs here: %q", f.Message)
+	}
+	if f.Value == nil || *f.Value != float64(42*1024*1024*1024) {
+		t.Fatalf("the value has to be the byte count: %v", f.Value)
+	}
+	if f.Unit != "bytes" {
+		t.Fatalf("unit = %q", f.Unit)
+	}
+}
+
+func TestAnUnreadDatasetSizeIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].DataBytes = nil
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "sst/size"); len(fs) != 0 {
+		t.Fatalf("a size nobody read cannot be reported: %+v", fs)
+	}
+}
+
+// GD-43 — what this run could not audit. A cron job needs one line to know
+// whether "no findings" meant "nothing is wrong".
+func TestCoverageIsReportedWhenEverythingWasAudited(t *testing.T) {
+	f := one(t, Run(threeHealthy(), nil, opts()), "audit/coverage")
+	if f.Status != finding.OK {
+		t.Fatalf("status = %s, want OK: %+v", f.Status, f)
+	}
+	// Without --state the counter checks report lifetime totals, and the
+	// coverage line is where a cron job finds that out.
+	if !strings.Contains(f.Message, "no baseline") {
+		t.Fatalf("the message must say the counters were not graded: %q", f.Message)
+	}
+}
+
+func TestCoverageNamesANodeThatCouldNotBeRead(t *testing.T) {
+	snaps := threeHealthy()
+	snaps = append(snaps, cluster.Snapshot{Node: "dr-04", At: now, Err: "dial tcp: i/o timeout"})
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "audit/coverage")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "dr-04") {
+		t.Fatalf("the node that was not audited must be named: %q", f.Message)
+	}
+}
+
+func TestCoverageNamesAMissingGrant(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].SysTables = nil
+	snaps[1].AppTables = nil
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "audit/coverage")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the node whose schema could not be read must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "OK") {
+		t.Fatalf("the hint has to say an OK from a check that never ran is not an OK: %q", f.Hint)
+	}
+}
+
+// With a baseline the counter checks are graded, and the coverage line says so
+// instead of warning about it.
+func TestCoverageWithABaselineDoesNotMentionIt(t *testing.T) {
+	snaps := threeHealthy()
+	prev := state.New(snaps, now.Add(-10*time.Minute))
+	f := one(t, Run(snaps, &prev, opts()), "audit/coverage")
+	if f.Status != finding.OK {
+		t.Fatalf("status = %s, want OK: %+v", f.Status, f)
+	}
+	if strings.Contains(f.Message, "no baseline") {
+		t.Fatalf("there is a baseline: %q", f.Message)
 	}
 }

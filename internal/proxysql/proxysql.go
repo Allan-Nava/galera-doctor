@@ -50,7 +50,11 @@ type Snapshot struct {
 	At         time.Time      `json:"at"`
 	Servers    []Server       `json:"servers,omitempty"`
 	Hostgroups []HostgroupSet `json:"hostgroups,omitempty"`
-	Err        string         `json:"error,omitempty"`
+	// MonitorEnabled is mysql-monitor_enabled. A pointer because nil means
+	// "not read" — an unread variable is not a variable set to false, and the
+	// difference decides whether proxysql/monitor says anything at all.
+	MonitorEnabled *bool  `json:"monitor_enabled,omitempty"`
+	Err            string `json:"error,omitempty"`
 }
 
 // OK reports whether the proxy was read.
@@ -113,6 +117,20 @@ func Collect(ctx context.Context, dsn string, timeout time.Duration) Snapshot {
 		}
 		hgs.Close()
 	}
+
+	// Whether the monitor that drives those hostgroups is running at all
+	// (GD-42). A proxy that does not answer this leaves it nil: not read.
+	if vars, err := cluster.Query(ctx, db, `SELECT variable_value FROM runtime_global_variables
+	                                         WHERE variable_name = 'mysql-monitor_enabled'`); err == nil {
+		for vars.Next() {
+			var v string
+			if err := vars.Scan(&v); err == nil {
+				on := strings.EqualFold(strings.TrimSpace(v), "true") || strings.TrimSpace(v) == "1"
+				snap.MonitorEnabled = &on
+			}
+		}
+		vars.Close()
+	}
 	return snap
 }
 
@@ -138,6 +156,7 @@ func Audit(snap Snapshot, snaps []cluster.Snapshot) []finding.Finding {
 		}}
 	}
 	var out []finding.Finding
+	out = append(out, monitorRunning(snap)...)
 
 	// Which addresses does the proxy know about, outside the monitor's own
 	// offline hostgroup?
@@ -236,6 +255,44 @@ func Audit(snap Snapshot, snaps []cluster.Snapshot) []finding.Finding {
 			Message: fmt.Sprintf("writer %d, backup writer %d, reader %d, offline %d (monitor-managed, not graded)",
 				h.Writer, h.BackupWriter, h.Reader, h.Offline),
 			Hint: "the offline hostgroup is where ProxySQL's Galera monitor parks nodes on its own: its contents are never a finding",
+		})
+	}
+	return out
+}
+
+// monitorRunning reports a proxy whose Galera monitor has stopped (GD-42).
+//
+// Every other check in this package compares the proxy's hostgroups with the
+// cluster's state. The monitor is what keeps those hostgroups current — it is
+// the thing that moves a desynced node out of the writer hostgroup — so with it
+// off, the comparison is being made against a photograph. It can agree
+// perfectly with a cluster that moved hours ago, which is the failure this
+// package exists to catch, one level up.
+//
+// A deployment with no Galera hostgroup table at all is a configuration choice
+// rather than a stopped monitor, and an unread variable is not a variable set
+// to false: both stay quiet.
+func monitorRunning(snap Snapshot) []finding.Finding {
+	var out []finding.Finding
+
+	if snap.MonitorEnabled != nil && !*snap.MonitorEnabled {
+		out = append(out, finding.Finding{
+			Check: "proxysql/monitor", Target: "proxysql", Status: finding.BAD,
+			Message: "mysql-monitor_enabled is false: nothing is updating the hostgroups",
+			Hint: "every other proxysql/* finding below is a photograph, not live — the monitor is what moves a desynced node out of the writer hostgroup, " +
+				"so the proxy can agree with a cluster that moved hours ago",
+		})
+	}
+
+	for _, h := range snap.Hostgroups {
+		if h.Active != 0 {
+			continue
+		}
+		out = append(out, finding.Finding{
+			Check: "proxysql/monitor", Target: fmt.Sprintf("hostgroup %d", h.Writer), Status: finding.BAD,
+			Message: fmt.Sprintf("the Galera hostgroup set for writer %d is inactive (active=0)", h.Writer),
+			Hint: "the monitor does not drive an inactive set, so nodes are never moved between these hostgroups: " +
+				"the mapping is a photograph and not live, however well it happens to match right now",
 		})
 	}
 	return out

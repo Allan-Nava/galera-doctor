@@ -6,6 +6,60 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.6.0] - 2026-09-03
+
+M6 — configured, and not running. Everything before this compares the nodes
+with each other; these six compare what a node is *configured to believe* with
+what is actually there.
+
+### Added
+
+- **`cluster/peers`** (GD-38) — `wsrep_cluster_address` resolved against the
+  nodes actually in the component, on every spelling each answers to. It is
+  only read at startup, which is why nothing reports it: a list naming servers
+  this cluster does not have is `WARN`, a list naming **no** current member is
+  `BAD` (that node cannot rejoin), and an empty `gcomm://` is `BAD` — the
+  bootstrap form left in a running node's configuration means the next restart
+  forms a second Primary component instead of rejoining this one.
+
+- **`flow/settings`** (GD-39) — `gcs.fc_limit`, `gcs.fc_factor` and the
+  master-slave flags compared across nodes. The cluster pauses when the slowest
+  queue reaches *its own* limit, so the node with the smallest one paces every
+  writer; `flow/paused` reports that pausing without the reason. The finding
+  names the node that throttles first.
+
+- **`repl/appliers`** (GD-40) — `wsrep_slave_threads` (or its 10.6 name
+  `wsrep_applier_threads`) differing between nodes, reported next to that
+  node's receive queue, because the queue is why it matters. A node with a
+  quarter of its peers' apply threads is behind by configuration rather than by
+  load — a different fix from looking at its disk.
+
+- **`sst/size`** (GD-41) — what a rejoin actually copies: the data and index
+  length of every application table, from the largest node, with the SST method
+  beside it. "This node needs a full SST" is not actionable without the
+  gigabytes it implies and the donor it takes out of service for the duration.
+  `OK`, because a size is a number rather than a fault. The collector reads it
+  as a pointer: `nil` is "not read", since a zero would make an SST look free —
+  and `SUM()` over no rows is `NULL`, which is a real answer about an empty
+  cluster and not a failure.
+
+- **`proxysql/monitor`** (GD-42) — the proxy's Galera monitor is what keeps
+  every other `proxysql/*` comparison live. With `mysql-monitor_enabled=false`,
+  or a hostgroup set with `active=0`, the hostgroups still look exactly like a
+  healthy cluster's — they just stopped following the one that is running, so
+  the agreement is a photograph. `BAD`. A proxy with no Galera hostgroup table
+  is a deployment choice rather than a stopped monitor, and an unread variable
+  is not a variable set to false: both stay quiet.
+
+- **`audit/coverage`** (GD-43) — one line saying what this run could not audit:
+  a node that could not be read, a missing `information_schema` grant, a clock
+  that did not answer, a missing baseline. A cron job sees an exit code and a
+  worst status, and neither distinguishes "nothing is wrong" from "the check
+  that would have found it never ran". Access gaps are `WARN` because a
+  statement was not made; a missing baseline is named in the same line and does
+  not escalate, since running without `--state` is a choice and warning about a
+  choice on every run is how a check stops being read.
+
 ## [0.5.2] - 2026-09-02
 
 ### Fixed

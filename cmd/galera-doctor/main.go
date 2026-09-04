@@ -120,7 +120,13 @@ func cmdChecks() int {
 		{"node/clock", "the spread between the nodes' own clocks"},
 		{"node/durability", "a cluster whose durability is one node's, not its average"},
 		{"cluster/segments", "the segment map, and the one shape that cannot be deliberate"},
+		{"cluster/peers", "a peer list that describes a cluster which no longer exists"},
+		{"flow/settings", "one node's flow-control limit pacing every writer"},
+		{"repl/appliers", "a node that applies with fewer threads than its peers"},
+		{"sst/size", "what a rejoin copies, and how long a donor is out of service"},
+		{"audit/coverage", "what this run could not audit, in one line"},
 		{"proxysql/*", "the proxy's view against the cluster's (needs --proxysql)"},
+		{"proxysql/monitor", "a proxy whose Galera monitor stopped: the hostgroups are a photograph"},
 	}
 	for _, r := range rows {
 		fmt.Printf("%-42s %s\n", r[0], r[1])

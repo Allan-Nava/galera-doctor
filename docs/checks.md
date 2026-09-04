@@ -154,6 +154,56 @@ exist, which is why this check is here: the cause reported next to the symptom
 is the difference between a finding and a diagnosis. RSU is something to turn on
 for one operation and off again, not a default.
 
+### `cluster/peers`
+
+`wsrep_cluster_address` — the list of peers a node contacts when it starts —
+resolved against the nodes actually in the component, on every spelling each one
+answers to.
+
+It is only exercised at a restart, which is why nothing reports it. Three
+outcomes: a list naming servers this cluster does not have is `WARN` (the
+remaining peers still answer, but the list is one decommission away from naming
+nobody); a list naming **no** current member is `BAD` (this node cannot rejoin);
+and an empty `gcomm://` is `BAD` — that is the bootstrap form, and left in a
+running node's configuration it means the next restart forms a second Primary
+component instead of rejoining this one.
+
+### `flow/settings`
+
+`gcs.fc_limit`, `gcs.fc_factor` and the master-slave flags, compared across
+nodes. The cluster pauses when the slowest queue reaches **its own** limit, so
+the node configured with the smallest one paces every writer in the cluster.
+[`flow/paused`](#flowpaused) reports that pausing; this reports the reason, and
+names the node that throttles first.
+
+### `repl/appliers`
+
+`wsrep_slave_threads` (or `wsrep_applier_threads`, its 10.6 name) differing
+between nodes, reported next to that node's receive queue. A node with a quarter
+of its peers' apply threads is behind by **configuration** rather than by load —
+which is a different fix from looking at its disk.
+
+### `sst/size`
+
+What a rejoin actually copies: the data and index length of every application
+table, from the largest node, with the SST method beside it. "This node needs a
+full SST" is not actionable without the gigabytes it implies and the donor it
+takes out of service for the duration. A size is a number rather than a fault,
+so this is `OK`; [`gcache/window`](#gcachewindow) is the check that grades
+whether an SST is likely at all.
+
+### `audit/coverage`
+
+One line saying what this run could **not** audit: a node that could not be
+read, a missing `information_schema` grant, a clock that did not answer, a
+missing baseline.
+
+A cron job sees an exit code and a worst status, and neither distinguishes
+"nothing is wrong" from "the check that would have found it never ran". Access
+gaps are `WARN`, because a statement was not made. A missing baseline is named
+in the same line and does not escalate: running without `--state` is a choice,
+and warning about a choice on every run is how a check stops being read.
+
 ### `repl/sync-wait`
 
 The nodes disagreeing about `wsrep_sync_wait`. With it on, a read waits for the
@@ -235,7 +285,15 @@ interesting state being the two disagreeing, which neither dashboard shows.
 | `proxysql/disagreement` | ONLINE while the node reports Joined (BAD), or shunned while the node reports Synced (WARN) |
 | `proxysql/hostgroup` | a hostgroup with servers configured and none ONLINE: every query routed there fails |
 | `proxysql/mapping` | the writer/reader/offline mapping, reported and **not graded** |
+| `proxysql/monitor` | the Galera monitor is not driving the hostgroups: `mysql-monitor_enabled=false`, or a hostgroup set with `active=0`. BAD — every finding above it is a photograph |
 
 The offline hostgroup — 999 in most deployments — is where ProxySQL's own Galera
 monitor parks nodes. Its contents are never a finding: flagging them is a
 permanent false positive, and "cleaning it up" fights the monitor.
+
+The same monitor is what keeps every one of those comparisons *live*, which is
+why `proxysql/monitor` exists: with the monitor off, the hostgroups still look
+exactly like a healthy cluster's — they just stopped following the one that is
+running. A proxy with no Galera hostgroup table at all is a deployment choice
+rather than a stopped monitor, and an unread variable is not a variable set to
+false: both stay quiet.

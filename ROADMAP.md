@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**45 items · 31 shipped · 14 open · 6 milestones.**
+**45 items · 37 shipped · 8 open · 6 milestones.**
 
 ## At a glance
 
@@ -17,7 +17,7 @@
 | **M3** — Fit the toolchain | `v0.3.0` | next | `######....` 57% | 3 | 4 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `########..` 83% | 1 | 5 |
-| **M6** — Configured, and not running | `v0.6.0` | next | `..........` 0% | 6 | 0 |
+| **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
 
 ## Next up
 
@@ -25,12 +25,12 @@ The open items with the highest priority in the milestones that are in flight.
 
 - **GD-14** — Backup freshness · `high` · size `M` · check (M2, target `v0.2.0`)
 - **GD-19** — checkfleet module · `high` · size `M` · integration (M3, target `v0.3.0`)
-- **GD-38** — The peer list against the membership · `high` · size `M` · check (M6, target `v0.6.0`)
-- **GD-39** — Flow control that one node decides for everybody · `high` · size `S` · check (M6, target `v0.6.0`)
-- **GD-42** — A proxy whose monitor stopped · `high` · size `M` · proxysql (M6, target `v0.6.0`)
 - **GD-15** — SST/IST history · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-17** — Cross-DC latency from the cluster's own numbers · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-21** — Docs site · `med` · size `M` · docs (M3, target `v0.3.0`)
+- **GD-32** — What changed since the last run · `med` · size `M` · output (M5, target `v0.3.0`)
+- **GD-18** — Watch mode · `low` · size `M` · cli (M2, target `v0.2.0`)
+- **GD-22** — Percona XtraDB Cluster and MySQL Group Replication · `low` · size `XL` · check (M3, target `v0.3.0`)
 
 ## Milestones
 
@@ -110,29 +110,29 @@ Target `v0.3.0` · next · 1 open · 5 shipped · `########..` 83%
 
 ### M6 — Configured, and not running
 
-Target `v0.6.0` · next · 6 open · 0 shipped · `..........` 0%
+Target `v0.6.0` · shipped · 0 open · 6 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-38** — The peer list against the membership | high | M | check | open |
-| **GD-39** — Flow control that one node decides for everybody | high | S | check | open |
-| **GD-42** — A proxy whose monitor stopped | high | M | proxysql | open |
-| **GD-40** — Appliers that are not the same size | med | S | check | open |
-| **GD-41** — What a rejoin will actually copy | med | M | check | open |
-| **GD-43** — What this run could not audit | med | S | output | open |
+| **GD-38** — The peer list against the membership | high | M | check | shipped `0.6.0` |
+| **GD-39** — Flow control that one node decides for everybody | high | S | check | shipped `0.6.0` |
+| **GD-42** — A proxy whose monitor stopped | high | M | proxysql | shipped `0.6.0` |
+| **GD-40** — Appliers that are not the same size | med | S | check | shipped `0.6.0` |
+| **GD-41** — What a rejoin will actually copy | med | M | check | shipped `0.6.0` |
+| **GD-43** — What this run could not audit | med | S | output | shipped `0.6.0` |
 
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 27 | 8 |
-| `output` | 3 | 2 |
+| `check` | 27 | 4 |
 | `cli` | 2 | 1 |
 | `docs` | 4 | 1 |
 | `integration` | 1 | 1 |
-| `proxysql` | 2 | 1 |
+| `output` | 3 | 1 |
 | `collect` | 1 | 0 |
 | `delivery` | 1 | 0 |
 | `project` | 3 | 0 |
+| `proxysql` | 2 | 0 |
 | `release` | 2 | 0 |
 | `tests` | 4 | 0 |

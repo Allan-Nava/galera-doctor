@@ -86,6 +86,16 @@ func TestCollectAgainstARealServer(t *testing.T) {
 		}
 	}
 
+	// GD-41: the dataset size. SUM() over no rows is NULL, which is a real
+	// answer (an empty cluster) and not a failure — scanning it into an int64
+	// would error, and only a real server shows which one happens.
+	if snap.DataBytes == nil {
+		t.Fatal("the dataset size was not read: nil means \"not audited\" to the audit")
+	}
+	if *snap.DataBytes < 0 {
+		t.Fatalf("a negative dataset size: %d", *snap.DataBytes)
+	}
+
 	// The primary key query must not report the server's own tables.
 	for _, table := range snap.TablesNoPK {
 		for _, schema := range SystemSchemas {
@@ -96,5 +106,5 @@ func TestCollectAgainstARealServer(t *testing.T) {
 	}
 	t.Logf("read %d status, %d variables, %d system tables, %d application tables, %d without a primary key, %d not on a replicated engine",
 		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.AppTables), len(snap.TablesNoPK), len(snap.TablesNonInnoDB))
-	t.Logf("clock skew against this host: %s", snap.Clock.Sub(snap.At))
+	t.Logf("clock skew against this host: %s, dataset %d bytes", snap.Clock.Sub(snap.At), *snap.DataBytes)
 }

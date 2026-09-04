@@ -110,3 +110,70 @@ func TestAnUnreadableProxyIsAnErrorNotSilence(t *testing.T) {
 		t.Fatalf("the hint must scope what was lost: %q", f.Hint)
 	}
 }
+
+// GD-42 — a proxy whose monitor stopped.
+//
+// Every other proxysql/* check compares the hostgroups with the cluster. The
+// Galera monitor is what keeps those hostgroups current: with it off, they are
+// a photograph. The comparison can agree perfectly with a cluster that moved
+// hours ago, and nothing in either dashboard says so.
+func TestAnInactiveGaleraHostgroupIsFound(t *testing.T) {
+	snap := Snapshot{
+		Servers:    []Server{{Hostgroup: 10, Hostname: "10.11.1.5", Port: 3306, Status: "ONLINE"}},
+		Hostgroups: []HostgroupSet{{Writer: 10, BackupWriter: 20, Reader: 30, Offline: 999, Active: 0}},
+	}
+	fs := Audit(snap, []cluster.Snapshot{node("sg-01", "10.11.1.5", "Synced")})
+	f := has(fs, "proxysql/monitor")
+	if f == nil || f.Status != finding.BAD {
+		t.Fatalf("an inactive galera hostgroup means nothing is being moved: %+v", f)
+	}
+	if !strings.Contains(f.Hint, "photograph") && !strings.Contains(f.Hint, "not live") {
+		t.Fatalf("the hint has to say the other findings are not live: %q", f.Hint)
+	}
+}
+
+func TestMonitorDisabledGloballyIsFound(t *testing.T) {
+	off := false
+	snap := Snapshot{
+		Servers:        []Server{{Hostgroup: 10, Hostname: "10.11.1.5", Status: "ONLINE"}},
+		Hostgroups:     []HostgroupSet{{Writer: 10, BackupWriter: 20, Reader: 30, Offline: 999, Active: 1}},
+		MonitorEnabled: &off,
+	}
+	fs := Audit(snap, []cluster.Snapshot{node("sg-01", "10.11.1.5", "Synced")})
+	f := has(fs, "proxysql/monitor")
+	if f == nil || f.Status != finding.BAD {
+		t.Fatalf("mysql-monitor_enabled=false stops every check the monitor drives: %+v", f)
+	}
+}
+
+func TestAWorkingMonitorIsQuiet(t *testing.T) {
+	on := true
+	snap := snapshot(Server{Hostgroup: 10, Hostname: "10.11.1.5", Status: "ONLINE"})
+	snap.MonitorEnabled = &on
+	fs := Audit(snap, []cluster.Snapshot{node("sg-01", "10.11.1.5", "Synced")})
+	if f := has(fs, "proxysql/monitor"); f != nil && f.Status != finding.OK {
+		t.Fatalf("a monitor that is running is not a finding: %+v", f)
+	}
+}
+
+// A proxy with no galera hostgroup table at all is a deployment choice, not a
+// stopped monitor: the mapping is unknown and the checks that need it are
+// skipped. It must not be reported as a monitor failure.
+func TestNoGaleraHostgroupsIsNotAMonitorFailure(t *testing.T) {
+	snap := Snapshot{Servers: []Server{{Hostgroup: 10, Hostname: "10.11.1.5", Status: "ONLINE"}}}
+	fs := Audit(snap, []cluster.Snapshot{node("sg-01", "10.11.1.5", "Synced")})
+	if f := has(fs, "proxysql/monitor"); f != nil && f.Status != finding.OK {
+		t.Fatalf("no galera hostgroups configured is not a stopped monitor: %+v", f)
+	}
+}
+
+// An unread variable is not a variable set to false.
+func TestAnUnreadMonitorVariableIsNotGraded(t *testing.T) {
+	snap := snapshot(Server{Hostgroup: 10, Hostname: "10.11.1.5", Status: "ONLINE"})
+	fs := Audit(snap, []cluster.Snapshot{node("sg-01", "10.11.1.5", "Synced")})
+	for _, f := range fs {
+		if f.Check == "proxysql/monitor" && f.Status != finding.OK {
+			t.Fatalf("nothing was read about the monitor, so nothing can be graded: %+v", f)
+		}
+	}
+}

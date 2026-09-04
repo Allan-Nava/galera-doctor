@@ -130,6 +130,10 @@ func (c Collector) Collect(ctx context.Context, n Node) Snapshot {
 			snap.TablesNonInnoDB = nil
 			_ = err
 		}
+		if snap.DataBytes, err = datasetBytes(ctx, db); err != nil {
+			snap.DataBytes = nil
+			_ = err
+		}
 	}
 	return snap
 }
@@ -373,6 +377,49 @@ func tablesNotReplicated(ctx context.Context, db *sql.DB) ([]string, error) {
 // placeholders is n comma-separated question marks.
 func placeholders(n int) string {
 	return strings.TrimRight(strings.Repeat("?,", n), ",")
+}
+
+// datasetBytes is what a full state transfer would have to copy: the data and
+// index length of every application table (GD-41).
+//
+// information_schema reports these per storage engine and they are an estimate
+// for InnoDB, not a file size — which is the right order of magnitude for the
+// only question being asked ("how long will this node be copying, and how long
+// is a donor out of service"). nil rather than 0 when the read fails: a size of
+// zero would make an SST look free.
+func datasetBytes(ctx context.Context, db *sql.DB) (*int64, error) {
+	args := make([]any, 0, len(SystemSchemas))
+	for _, s := range SystemSchemas {
+		args = append(args, s)
+	}
+	rows, err := Query(ctx, db, `
+		SELECT SUM(DATA_LENGTH + INDEX_LENGTH)
+		  FROM information_schema.TABLES
+		 WHERE TABLE_TYPE = 'BASE TABLE'
+		   AND TABLE_SCHEMA NOT IN (`+placeholders(len(SystemSchemas))+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("no row from the dataset size query")
+	}
+	// SUM over no rows is NULL, which is a real answer: an empty cluster.
+	var total sql.NullFloat64
+	if err := rows.Scan(&total); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	bytes := int64(0)
+	if total.Valid {
+		bytes = int64(total.Float64)
+	}
+	return &bytes, nil
 }
 
 // redact keeps a DSN — and therefore a password — out of an error message. A

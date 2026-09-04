@@ -59,6 +59,11 @@ type Snapshot struct {
 	// TablesNoPK lists application tables without a primary key. Galera's
 	// row-based certification needs one.
 	TablesNoPK []string `json:"tables_no_pk,omitempty"`
+	// DataBytes is what a full state transfer would have to copy: the data and
+	// index length of every application table. A pointer because nil means
+	// "not read" — a cluster that holds no data at all is a different
+	// statement, and a size of zero would make an SST look free.
+	DataBytes *int64 `json:"data_bytes,omitempty"`
 	// TablesNonInnoDB lists application tables on a storage engine Galera does
 	// not replicate, each rendered "schema.table (ENGINE)". The writes
 	// succeed, every counter stays green, and the rows exist on one node.
@@ -199,6 +204,11 @@ func (s Snapshot) Addresses() []string {
 	sort.Strings(out)
 	return dedupe(out)
 }
+
+// HostOnly drops a port and a CIDR suffix, both of which appear in
+// wsrep_node_address — and in wsrep_cluster_address, where a peer is written
+// however the person editing the config felt like writing it.
+func HostOnly(v string) string { return hostOnly(v) }
 
 // hostOnly drops a port and a CIDR suffix, both of which appear in
 // wsrep_node_address in the wild.

@@ -34,6 +34,7 @@ These are the states this tool exists for:
 | **A split brain that is already configured** | `pc.ignore_sb` left on after somebody recovered a cluster by hand, or quorum weights that are not one vote per node. Nothing is exercised until the network moves — and then both sides stay writable. |
 | **Tables Galera does not replicate at all** | A MyISAM or Aria table in an application schema. The write succeeds, nothing certifies it, no counter records it, and the rows exist on exactly one node. |
 | **Durability that is not the cluster's** | A cluster's durability is its weakest node's, not its average. One node acknowledging a commit before its log reaches the disk turns "committed on three nodes" into something else — and each node is doing exactly what it was told, so nothing reports it. |
+| **A node that cannot find its cluster** | `wsrep_cluster_address` is only read at startup. A list naming two decommissioned servers — or an empty `gcomm://` left behind after a bootstrap — belongs to a node that is Synced and green today and forms its own cluster tomorrow. |
 | **Flow control that already happened** | `wsrep_flow_control_paused` covers the time since the last status reset, so an incident from March reads the same today. Graded as a lifetime total it goes red once and stays red. |
 
 ## What a run looks like
@@ -97,7 +98,13 @@ repl/ws-limits                             appliers that will refuse a write-set
 node/clock                                 the spread between the nodes' own clocks
 node/durability                            a cluster whose durability is one node's, not its average
 cluster/segments                           the segment map, and the one shape that cannot be deliberate
+cluster/peers                              a peer list that describes a cluster which no longer exists
+flow/settings                              one node's flow-control limit pacing every writer
+repl/appliers                              a node that applies with fewer threads than its peers
+sst/size                                   what a rejoin copies, and how long a donor is out of service
+audit/coverage                             what this run could not audit, in one line
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
+proxysql/monitor                           a proxy whose Galera monitor stopped: the hostgroups are a photograph
 ```
 
 ## A total is not a rate

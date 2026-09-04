@@ -141,6 +141,11 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(writeSetLimits(rep.Cluster, live)...)
 	add(durability(rep.Cluster, live)...)
 	add(segments(rep.Cluster, live)...)
+	add(peerList(live)...)
+	add(flowSettings(rep.Cluster, live)...)
+	add(appliers(rep.Cluster, live)...)
+	add(sstSize(rep.Cluster, live)...)
+	add(coverage(rep.Cluster, snaps, live, prev)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
 	add(versions(rep.Cluster, live)...)
@@ -1341,6 +1346,342 @@ func segments(name string, live []cluster.Snapshot) []finding.Finding {
 		Message: fmt.Sprintf("%d segment(s) over %d node(s) — %s", len(groups), len(reporting), msg),
 		Value:   finding.Num(float64(len(groups))), Unit: "segments",
 	}}
+}
+
+// peerList compares what a node is configured to believe with what is there
+// (GD-38).
+//
+// wsrep_cluster_address is the list of peers a node contacts when it starts.
+// It is written by a human, and it is only exercised at a restart: a list that
+// names two decommissioned servers, or none of the current members, belongs to
+// a node that is Synced and green today and cannot find its cluster tomorrow.
+// An empty gcomm:// is worse — that is the bootstrap form, and a restart makes
+// the node form its own Primary component.
+func peerList(live []cluster.Snapshot) []finding.Finding {
+	// Every spelling the cluster answers to, so a peer named by address is not
+	// reported as missing.
+	known := map[string]bool{}
+	for _, s := range live {
+		for _, a := range s.Addresses() {
+			known[strings.ToLower(a)] = true
+		}
+	}
+
+	var out []finding.Finding
+	for _, s := range live {
+		raw, ok := s.Var("wsrep_cluster_address")
+		if !ok || strings.TrimSpace(raw) == "" {
+			continue
+		}
+		list := strings.TrimSpace(raw)
+		// gcomm://host:port,host?params
+		if i := strings.Index(list, "://"); i >= 0 {
+			list = list[i+3:]
+		}
+		if i := strings.Index(list, "?"); i >= 0 {
+			list = list[:i]
+		}
+
+		var peers, unknown, present []string
+		for _, p := range strings.Split(list, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			peers = append(peers, p)
+			if known[strings.ToLower(cluster.HostOnly(p))] {
+				present = append(present, p)
+			} else {
+				unknown = append(unknown, p)
+			}
+		}
+
+		switch {
+		case len(peers) == 0:
+			out = append(out, finding.Finding{
+				Check: "cluster/peers", Target: s.Node, Status: finding.BAD,
+				Message: "wsrep_cluster_address is empty (gcomm://): this node would bootstrap its own cluster",
+				Hint:    "the empty form is for bootstrapping a new cluster once — left in a running node's configuration it means the next restart forms a second Primary component instead of rejoining this one",
+			})
+		case len(present) == 0:
+			out = append(out, finding.Finding{
+				Check: "cluster/peers", Target: s.Node, Status: finding.BAD,
+				Message: fmt.Sprintf("wsrep_cluster_address names no current member: %s", strings.Join(peers, ", ")),
+				Hint:    "this node cannot rejoin after a restart — it will contact servers that are not in the cluster and give up, and nothing says so until it tries",
+			})
+		case len(unknown) > 0:
+			out = append(out, finding.Finding{
+				Check: "cluster/peers", Target: s.Node, Status: finding.WARN,
+				Message: fmt.Sprintf("wsrep_cluster_address names %s, which is not in this cluster", strings.Join(unknown, ", ")),
+				Hint:    "a restart still works — the remaining peers answer — but the list describes a cluster that no longer exists, and it is one decommission away from naming nobody",
+			})
+		}
+	}
+	return out
+}
+
+// flowSettings reports flow control that one node decides for everybody
+// (GD-39).
+//
+// The cluster throttles when the slowest queue reaches its own limit, so the
+// node configured with the smallest gcs.fc_limit paces every writer in the
+// cluster. flow/paused reports the pausing; this reports the reason, which is
+// otherwise invisible: each node is doing exactly what it was configured to do.
+func flowSettings(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, opt := range []string{"gcs.fc_limit", "gcs.fc_factor", "gcs.fc_master_slave", "gcs.fc_single_primary"} {
+		var reporting []cluster.Snapshot
+		for _, s := range live {
+			if v, ok := s.ProviderOption(opt); ok && strings.TrimSpace(v) != "" {
+				reporting = append(reporting, s)
+			}
+		}
+		if len(reporting) < 2 {
+			continue
+		}
+		groups := groupBy(reporting, func(s cluster.Snapshot) string {
+			v, _ := s.ProviderOption(opt)
+			return strings.TrimSpace(v)
+		})
+		if len(groups) == 1 {
+			continue
+		}
+		msg := fmt.Sprintf("nodes disagree about %s: %s", opt, describeGroups(groups))
+		hint := "these settings are the cluster's pacing, not a node's: the strictest node decides when everybody waits"
+		if opt == "gcs.fc_limit" {
+			// The smallest limit is the one that fires first.
+			var strictest string
+			var smallest float64
+			for _, s := range reporting {
+				v, _ := s.ProviderOption(opt)
+				f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+				if err != nil {
+					continue
+				}
+				if strictest == "" || f < smallest {
+					strictest, smallest = s.Node, f
+				}
+			}
+			if strictest != "" {
+				msg += fmt.Sprintf(" — %s throttles first, at %s", strictest, trimFloat(smallest))
+			}
+			hint = "the cluster pauses when the slowest queue hits its own limit, so " + strictest +
+				" paces every writer in the cluster — flow/paused reports that pausing without this reason"
+		}
+		out = append(out, finding.Finding{
+			Check: "flow/settings", Target: name, Status: finding.WARN,
+			Message: msg, Hint: hint,
+		})
+	}
+	return out
+}
+
+// appliers reports nodes that apply with fewer threads than their peers
+// (GD-40).
+//
+// A node with a quarter of its peers' apply threads is slower by
+// configuration rather than by load, and it shows up as queue depth — which
+// sends whoever is on call to look at its disk. The receive queue goes in the
+// same line for exactly that reason.
+func appliers(name string, live []cluster.Snapshot) []finding.Finding {
+	// MariaDB 10.6 renamed the variable; a build may report either or both.
+	value := func(s cluster.Snapshot) (float64, bool) {
+		for _, key := range []string{"wsrep_applier_threads", "wsrep_slave_threads"} {
+			v, ok := s.Var(key)
+			if !ok || strings.TrimSpace(v) == "" {
+				continue
+			}
+			if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+				return f, true
+			}
+		}
+		return 0, false
+	}
+
+	var reporting []cluster.Snapshot
+	for _, s := range live {
+		if _, ok := value(s); ok {
+			reporting = append(reporting, s)
+		}
+	}
+	if len(reporting) < 2 {
+		return nil
+	}
+	groups := groupBy(reporting, func(s cluster.Snapshot) string {
+		f, _ := value(s)
+		return trimFloat(f)
+	})
+	if len(groups) == 1 {
+		return nil
+	}
+
+	var slowest string
+	var fewest float64
+	for _, s := range reporting {
+		f, _ := value(s)
+		if slowest == "" || f < fewest {
+			slowest, fewest = s.Node, f
+		}
+	}
+	msg := fmt.Sprintf("nodes apply with different thread counts: %s — %s has the fewest, %s",
+		describeGroups(groups), slowest, trimFloat(fewest))
+	for _, s := range live {
+		if s.Node != slowest {
+			continue
+		}
+		if q, ok := s.Float("wsrep_local_recv_queue"); ok {
+			msg += fmt.Sprintf(" (receive queue %s)", trimFloat(q))
+		}
+	}
+	return []finding.Finding{{
+		Check: "repl/appliers", Target: name, Status: finding.WARN,
+		Message: msg,
+		Value:   finding.Num(fewest), Unit: "threads",
+		Hint: "an applier count is per node while everybody discusses throughput as the cluster's: " + slowest +
+			" is behind by configuration rather than by load, which is a different fix from looking at its disk",
+	}}
+}
+
+// sstSize reports what a rejoin will actually copy (GD-41).
+//
+// "This node needs a full SST" is not actionable on its own. The number of
+// gigabytes it implies is what tells whoever is on call whether that is two
+// minutes or two hours — and a full SST takes the donor out of service for the
+// duration, so the sentence has to carry both. The size is a number, not a
+// fault, so this is OK: gcache/window is the check that grades whether an SST
+// is likely in the first place.
+func sstSize(name string, live []cluster.Snapshot) []finding.Finding {
+	var largest int64
+	var on string
+	for _, s := range live {
+		if s.DataBytes == nil {
+			continue
+		}
+		if on == "" || *s.DataBytes > largest {
+			largest, on = *s.DataBytes, s.Node
+		}
+	}
+	if on == "" {
+		return nil
+	}
+
+	msg := fmt.Sprintf("a full state transfer copies about %s (largest node: %s)", humanBytes(largest), on)
+	methods := map[string]bool{}
+	for _, s := range live {
+		if v, ok := s.Var("wsrep_sst_method"); ok && strings.TrimSpace(v) != "" {
+			methods[strings.ToLower(strings.TrimSpace(v))] = true
+		}
+	}
+	if len(methods) == 1 {
+		for m := range methods {
+			msg += " with " + m
+		}
+	}
+	return []finding.Finding{{
+		Check: "sst/size", Target: name, Status: finding.OK,
+		Message: msg,
+		Value:   finding.Num(float64(largest)), Unit: "bytes",
+		Hint: "that is how much a rejoining node has to receive, and how long a donor is out of service while it sends it — the pair of numbers behind \"needs a full SST\"",
+	}}
+}
+
+// coverage says what this run could not audit (GD-43).
+//
+// A cron job sees an exit code and a worst status. Neither of them
+// distinguishes "nothing is wrong" from "the check that would have found it
+// never ran" — a missing grant, a metric this build does not report, a node
+// that could not be read. This is the one line that does.
+//
+// Access gaps escalate to WARN because a statement was not made. A missing
+// baseline does not: it is named in the same line, but running without --state
+// is a choice, and warning about a choice on every run is how a check stops
+// being read.
+func coverage(name string, snaps, live []cluster.Snapshot, prev *state.State) []finding.Finding {
+	var unread, noSysTables, noSchema, noClock, noSize []string
+	for _, s := range snaps {
+		if !s.OK() {
+			unread = append(unread, s.Node)
+		}
+	}
+	for _, s := range live {
+		if len(s.SysTables) == 0 {
+			noSysTables = append(noSysTables, s.Node)
+		}
+		if s.AppTables == nil {
+			noSchema = append(noSchema, s.Node)
+		}
+		if s.Clock.IsZero() {
+			noClock = append(noClock, s.Node)
+		}
+		if s.DataBytes == nil {
+			noSize = append(noSize, s.Node)
+		}
+	}
+
+	var gaps []string
+	access := false
+	if len(unread) > 0 {
+		gaps = append(gaps, fmt.Sprintf("%d node(s) could not be read (%s)", len(unread), strings.Join(unread, ", ")))
+		access = true
+	}
+	if len(noSysTables) > 0 {
+		gaps = append(gaps, "system table definitions on "+strings.Join(noSysTables, ", "))
+		access = true
+	}
+	if len(noSchema) > 0 {
+		gaps = append(gaps, "application schemas on "+strings.Join(noSchema, ", "))
+		access = true
+	}
+	if len(noClock) > 0 {
+		gaps = append(gaps, "the clock on "+strings.Join(noClock, ", "))
+		access = true
+	}
+	if len(noSize) > 0 {
+		gaps = append(gaps, "the dataset size on "+strings.Join(noSize, ", "))
+		access = true
+	}
+	if prev == nil {
+		gaps = append(gaps, "no baseline: the counter checks report lifetime totals instead of the interval")
+	}
+
+	if len(gaps) == 0 {
+		return []finding.Finding{{
+			Check: "audit/coverage", Target: name, Status: finding.OK,
+			Message: fmt.Sprintf("every check ran, across %d node(s)", len(live)),
+			Value:   finding.Num(float64(len(live))), Unit: "nodes",
+		}}
+	}
+	status := finding.OK
+	prefix := "everything was audited, with one caveat: "
+	if access {
+		status = finding.WARN
+		prefix = "audited with gaps: "
+	}
+	if len(gaps) > 1 {
+		prefix = "audited with gaps: "
+	}
+	return []finding.Finding{{
+		Check: "audit/coverage", Target: name, Status: status,
+		Message: prefix + strings.Join(gaps, "; "),
+		Value:   finding.Num(float64(len(live))), Unit: "nodes",
+		Hint: "an OK from a check that never ran is not an OK — grant the audit user what is missing above, or take the gap into account before believing this report",
+	}}
+}
+
+// humanBytes prints a size the way somebody talks about it.
+func humanBytes(n int64) string {
+	const unit = 1024.0
+	f := float64(n)
+	for _, suffix := range []string{"B", "KiB", "MiB", "GiB", "TiB"} {
+		if f < unit || suffix == "TiB" {
+			if suffix == "B" {
+				return fmt.Sprintf("%d B", n)
+			}
+			return fmt.Sprintf("%.1f %s", f, suffix)
+		}
+		f /= unit
+	}
+	return fmt.Sprintf("%d B", n)
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.
