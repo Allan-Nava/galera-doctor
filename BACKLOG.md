@@ -125,6 +125,15 @@ touching this file, or CI will fail.
   `SHA256SUMS` the release workflow computed over the bytes it uploaded — a
   checksum somebody retyped is a formula that fails on the one machine that
   matters. <!-- gd: prio=med size=S labels=delivery ver=0.3.0 -->
+- [x] **GD-54 — Nothing ever installed the formula**: the release generated,
+  committed and published a Homebrew formula that no job had ever run
+  `brew install` against. A macOS job now does — `brew style`, `brew install`,
+  `brew test`, and the installed binary has to report the released version —
+  rendering the formula from the published release rather than from the
+  committed file, because that is what a user gets. Plus a scheduled workflow
+  that installs from the tap the way the docs say to, since a release asset can
+  be deleted long after the run that made it went green.
+  <!-- gd: prio=high size=S labels=release,tests ver=0.9.1 -->
 - [x] **GD-21 — Docs site**: `docs/` published with the same POSIX-sh generator
   the sibling tools use, with a dead-link gate in CI.
   <!-- gd: prio=med size=M labels=docs ver=0.9.0 -->

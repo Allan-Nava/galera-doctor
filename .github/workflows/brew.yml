@@ -1,0 +1,48 @@
+name: Homebrew tap
+
+# The release verifies the formula it publishes. This verifies the *published
+# tap*, which has a life after that run: a release asset can be deleted, a
+# repository can be renamed, and the first person to find out should not be
+# somebody typing `brew install`.
+#
+# It installs the way the docs say to — brew tap by URL, then brew install by
+# name — so what is tested is the sentence a reader will actually run.
+on:
+  schedule:
+    # The 4th of each month, early. Nothing here is urgent; it exists so a
+    # broken tap is found in weeks rather than never.
+    - cron: "17 6 4 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brew-tap
+  cancel-in-progress: false
+
+jobs:
+  install-from-the-tap:
+    runs-on: macos-latest
+    steps:
+      - name: brew tap, the way the docs say to
+        run: |
+          brew tap Allan-Nava/galera-doctor https://github.com/Allan-Nava/galera-doctor
+          brew install galera-doctor
+
+      - name: The tap installs something that runs
+        run: |
+          galera-doctor version
+          galera-doctor checks | head -3
+          # A binary that cannot be pointed at anything still exits 2 on a
+          # usage error rather than crashing, which is the cheapest proof that
+          # this is the real thing and not a stub.
+          if galera-doctor audit >/dev/null 2>&1; then
+            echo "::error::an audit with no node given should be a usage error"
+            exit 1
+          fi
+
+      - name: The formula in the tap is the one the repository generated
+        run: |
+          brew info --json=v2 --formula galera-doctor |
+            python3 -c 'import json,sys; d=json.load(sys.stdin)["formulae"][0]; print(d["name"], d["versions"]["stable"])'

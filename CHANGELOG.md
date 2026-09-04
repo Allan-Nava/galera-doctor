@@ -6,6 +6,32 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.9.1] - 2026-09-04
+
+### Added
+
+- **The release installs the formula it publishes** (GD-54) — a macOS job runs
+  `brew style`, `brew install --formula`, `brew test` and asserts that
+  `galera-doctor version` reports the tag that was just released. It renders
+  the formula from the published release's own `SHA256SUMS` rather than from
+  the committed file, because that is what a user gets and it does not depend
+  on the formula commit having landed first. `brew audit` runs alongside and is
+  advisory: it has rules for the core tap that a single-binary formula in its
+  own tap cannot satisfy, and failing a release on those would teach everybody
+  to ignore the job.
+
+  Until now the formula was generated, committed and published without anything
+  ever installing it. A correct-looking `sha256` on a wrong URL, a platform
+  block that never matches, a `test do` that fails — all of it would have sat
+  on `main` and broken on somebody's laptop.
+
+- **The published tap is checked on a schedule** (GD-54) —
+  `.github/workflows/brew.yml` taps by URL and installs by name, monthly and on
+  demand, the way [docs/install.md](docs/install.md) says to. The release job
+  proves the formula was right when it was written; this proves the tap still
+  works, because a release asset can be deleted long after the run that made it
+  went green.
+
 ## [0.9.0] - 2026-09-04
 
 ### Added

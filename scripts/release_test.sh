@@ -283,6 +283,92 @@ else
 	fail "re-running the workflow for an existing tag would fail on gh release create"
 fi
 
+# ---------------------------------------------------------------------------
+# The Homebrew formula is generated, committed and published by the workflow —
+# and until now nothing ever installed it. A formula with a correct-looking
+# sha256 and a wrong url, a platform block that never matches, or a test block
+# that fails, would sit on main and break on somebody's laptop instead of in
+# CI. So the release has to install what it just published, on a real macOS
+# runner, and the tap has to be checked periodically because a release asset
+# can be deleted long after the run that made it went green.
+# ---------------------------------------------------------------------------
+brew_workflow="$root/.github/workflows/brew.yml"
+
+# The brew job's own lines. An awk range like /^  brew:/,/^  [a-z]/ matches a
+# single line, because the start line satisfies the end pattern too — the flag
+# is what makes this the job rather than its heading.
+brew_job() {
+	awk '/^  brew:/ { f = 1; next } f && /^  [a-z_-]+:/ { f = 0 } f' "$workflow"
+}
+
+checks=$((checks + 1))
+if grep -qE '^  brew:' "$workflow"; then
+	pass "the release has a brew job"
+else
+	fail "nothing in the release workflow installs the formula it publishes"
+fi
+
+checks=$((checks + 1))
+if brew_job | grep -qE 'runs-on: *macos'; then
+	pass "and it runs on macOS, where brew installs are real"
+else
+	fail "the brew job does not run on macOS"
+fi
+
+checks=$((checks + 1))
+if brew_job | grep -qF "needs: artifacts"; then
+	pass "it waits for the release to exist"
+else
+	fail "the brew job does not wait for the archives to be published"
+fi
+
+for want in "brew install" "brew test" "brew style"; do
+	checks=$((checks + 1))
+	if brew_job | grep -qF -e "$want"; then
+		pass "the brew job runs $want"
+	else
+		fail "the brew job never runs $want"
+	fi
+done
+
+# Installing is not proof the right thing was installed.
+checks=$((checks + 1))
+if brew_job | grep -qF "galera-doctor version"; then
+	pass "and asserts the installed binary reports the released version"
+else
+	fail "nothing checks that the installed binary is the released one"
+fi
+
+# The tap is a published thing with a life after the release run.
+checks=$((checks + 1))
+if [ -f "$brew_workflow" ]; then
+	pass "there is a workflow for the published tap"
+else
+	fail "no .github/workflows/brew.yml: nothing ever checks the tap again"
+fi
+
+checks=$((checks + 1))
+if [ -f "$brew_workflow" ] && grep -qF "schedule:" "$brew_workflow"; then
+	pass "the tap is checked on a schedule, not only when somebody remembers"
+else
+	fail "the tap check has no schedule"
+fi
+
+checks=$((checks + 1))
+if [ -f "$brew_workflow" ] && grep -qF "workflow_dispatch" "$brew_workflow"; then
+	pass "and can be run by hand"
+else
+	fail "the tap check cannot be run on demand"
+fi
+
+# The real user path, not a local file: brew tap <url> && brew install.
+checks=$((checks + 1))
+if [ -f "$brew_workflow" ] && grep -qF "brew tap" "$brew_workflow"; then
+	pass "the tap check installs the way the docs say to"
+else
+	fail "the tap check does not go through brew tap"
+fi
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures of $checks checks failed" >&2

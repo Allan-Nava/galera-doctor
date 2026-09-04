@@ -92,6 +92,66 @@ jobs:
           # condition to get wrong.
           git push origin HEAD:${{ github.event.repository.default_branch }}
 
+  # The formula is generated, committed and published by the job above — and
+  # nothing used to install it. A correct-looking sha256 on a wrong url, a
+  # platform block that never matches, a test block that fails: all of it would
+  # sit on main and break on somebody's laptop instead of here. So the release
+  # installs what it just published, on a real macOS runner, from the release's
+  # own SHA256SUMS rather than from the committed file — that is what a user
+  # gets, and it does not depend on the push having landed first.
+  brew:
+    needs: artifacts
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag being released
+        id: v
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >>"$GITHUB_OUTPUT"
+
+      - name: Render the formula from the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          gh release download "$TAG" --pattern SHA256SUMS --dir dist
+          ./scripts/brew.sh write "$TAG" dist/SHA256SUMS
+
+      # Deterministic, because the file is generated: if brew style has an
+      # opinion, the generator is what changes.
+      - name: brew style
+        run: brew style --formula Formula/galera-doctor.rb
+
+      - name: brew install
+        run: brew install --formula --verbose Formula/galera-doctor.rb
+
+      # The test block in the formula: it runs the binary, which is the only
+      # thing that proves the archive for this platform was the right one.
+      - name: brew test
+        run: brew test --formula Formula/galera-doctor.rb
+
+      - name: The installed binary is the released one
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          got=$(galera-doctor version)
+          echo "$got"
+          case "$got" in
+          *"${TAG#v}") echo "ok: $got" ;;
+          *)
+            echo "::error::installed $got, expected version ${TAG#v}"
+            exit 1
+            ;;
+          esac
+          galera-doctor checks | head -3
+
+      # Homebrew's own audit is advisory here: it has rules for formulae in the
+      # core tap that a single-binary formula in its own tap cannot satisfy, and
+      # failing a release on those would teach everybody to ignore this job.
+      - name: brew audit
+        continue-on-error: true
+        run: brew audit --formula Formula/galera-doctor.rb
+
   image:
     runs-on: ubuntu-latest
     permissions:

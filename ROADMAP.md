@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**53 items · 41 shipped · 12 open · 7 milestones.**
+**54 items · 42 shipped · 12 open · 7 milestones.**
 
 ## At a glance
 
@@ -14,7 +14,7 @@
 |---|---|---|---|---|---|
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
 | **M2** — Deeper into the cluster | `v0.2.0` | later | `#####.....` 50% | 3 | 3 |
-| **M3** — Fit the toolchain | `v0.3.0` | later | `#######...` 71% | 2 | 5 |
+| **M3** — Fit the toolchain | `v0.3.0` | later | `########..` 75% | 2 | 6 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | shipped | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
@@ -68,13 +68,14 @@ Target `v0.2.0` · later · 3 open · 3 shipped · `#####.....` 50%
 
 ### M3 — Fit the toolchain
 
-Target `v0.3.0` · later · 2 open · 5 shipped · `#######...` 71%
+Target `v0.3.0` · later · 2 open · 6 shipped · `########..` 75%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
 | **GD-19** — checkfleet module | high | M | integration | open |
 | **GD-22** — Percona XtraDB Cluster and MySQL Group Replication | low | XL | check | open |
 | **GD-20** — Release pipeline | high | M | release | shipped `0.3.0` |
+| **GD-54** — Nothing ever installed the formula | high | S | release,tests | shipped `0.9.1` |
 | **GD-21** — Docs site | med | M | docs | shipped `0.9.0` |
 | **GD-23** — Identity and landing page | med | S | docs,project | shipped `0.1.1` |
 | **GD-24** — The project's own metadata is generated too | med | S | project,docs | shipped `0.1.1` |
@@ -149,5 +150,5 @@ Target `v1.0.0` · next · 7 open · 0 shipped · `..........` 0%
 | `output` | 3 | 0 |
 | `project` | 3 | 0 |
 | `proxysql` | 2 | 0 |
-| `release` | 2 | 0 |
-| `tests` | 5 | 0 |
+| `release` | 3 | 0 |
+| `tests` | 6 | 0 |
