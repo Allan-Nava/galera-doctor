@@ -6,19 +6,20 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**56 items · 47 shipped · 9 open · 7 milestones.**
+**56 items · 48 shipped · 8 open · 8 milestones.**
 
 ## At a glance
 
 | Milestone | Target | Phase | Progress | Open | Shipped |
 |---|---|---|---|---|---|
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
-| **M2** — Deeper into the cluster | `v0.2.0` | later | `#####.....` 50% | 3 | 3 |
+| **M2** — Deeper into the cluster | `v0.2.0` | shipped | `##########` 100% | 0 | 4 |
 | **M3** — Fit the toolchain | `v0.3.0` | later | `########..` 80% | 2 | 8 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | shipped | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
 | **M7** — Every write path, drawn or not | `v1.0.0` | next | `####......` 43% | 4 | 3 |
+| **M8** — Parked, and why | `v2.0.0` | later | `..........` 0% | 2 | 0 |
 
 ## Next up
 
@@ -52,16 +53,14 @@ Target `v0.1.0` · shipped · 0 open · 12 shipped · `##########` 100%
 
 ### M2 — Deeper into the cluster
 
-Target `v0.2.0` · later · 3 open · 3 shipped · `#####.....` 50%
+Target `v0.2.0` · shipped · 0 open · 4 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-14** — Backup freshness | high | M | check | open |
-| **GD-15** — SST/IST history | med | L | check | open |
-| **GD-18** — Watch mode | low | M | cli | open |
 | **GD-13** — Application schema drift | high | M | check | shipped `0.2.0` |
 | **GD-16** — Node clock skew | med | S | check | shipped `0.5.0` |
 | **GD-17** — Cross-DC latency from the cluster's own numbers | med | L | check | shipped `0.8.0` |
+| **GD-18** — Watch mode | low | M | cli | shipped `0.12.0` |
 
 ### M3 — Fit the toolchain
 
@@ -136,14 +135,23 @@ Target `v1.0.0` · next · 4 open · 3 shipped · `####......` 43%
 | **GD-48** — GTID domains that do not agree | high | S | check | shipped `0.11.0` |
 | **GD-50** — Triggers that run on one node only | high | S | check | shipped `0.11.0` |
 
+### M8 — Parked, and why
+
+Target `v2.0.0` · later · 2 open · 0 shipped · `..........` 0%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-14** — Backup freshness | high | M | check | open |
+| **GD-15** — SST/IST history | med | L | check | open |
+
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
 | `check` | 34 | 7 |
-| `cli` | 2 | 1 |
 | `collect` | 4 | 1 |
 | `integration` | 1 | 1 |
+| `cli` | 2 | 0 |
 | `delivery` | 2 | 0 |
 | `docs` | 4 | 0 |
 | `output` | 3 | 0 |

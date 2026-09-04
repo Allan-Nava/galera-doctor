@@ -138,6 +138,11 @@ A DSN is never printed. Findings identify nodes by name, and a driver error that
 <td>never</td>
 <td>exit 1 when a finding reaches <code>S</code></td>
 </tr>
+<tr>
+<td><code>--watch D</code></td>
+<td>off</td>
+<td>re-audit every <code>D</code> and print only the transitions</td>
+</tr>
 </tbody></table></div>
 <h2 id="exit-status">Exit status</h2>
 <div class="scroll"><table><thead><tr>
@@ -157,6 +162,30 @@ A DSN is never printed. Findings identify nodes by name, and a driver error that
 <td>usage error, or no node could be resolved</td>
 </tr>
 </tbody></table></div>
+<h2 id="while-you-are-repairing-it">While you are repairing it</h2>
+<pre><code>
+$ galera-doctor audit --config clusters.json --watch 10s
+</code></pre>
+<p>
+The first report in full, so you know where you are starting from, and after that <strong>only what moved</strong>:
+</p>
+<pre><code>
+16:34:48  OK    cluster/uuid   compress/compress  all nodes report one cluster  [BAD → OK]
+16:35:18  WARN  node/state     compress/ov-03     local state is Donor/Desynced  [OK → WARN]
+16:35:48  ERROR                compress/node/read@ov-03 no longer reported  [ERROR → gone]
+</code></pre>
+<p>
+A tick that changed nothing prints nothing — reprinting twenty <code>OK</code> lines every ten seconds buries the one that matters. A finding that <strong>disappeared</strong> is reported too, because during a repair that is usually the line you are waiting for; an <code>OK</code> that stopped being reported is not, since the check simply did not run this time.
+</p>
+<p>
+<code>--watch</code> refuses an interval under a second (a busy loop against a cluster that is already having a bad day) and refuses <code>--json</code> and <code>--findings</code>: those emit one document per run, and a stream of documents is not a document.
+</p>
+<p>
+With <code>--state</code>, each tick writes the file and reads back what it wrote, so the rate checks grade the watch interval rather than the whole session.
+</p>
+<p>
+It is not a daemon and not a monitoring system: it runs in the foreground, holds its baseline in memory, and stops when you do.
+</p>
 <h2 id="in-a-scheduled-job">In a scheduled job</h2>
 <pre><code>
 galera-doctor audit --config /etc/galera-doctor/clusters.json \

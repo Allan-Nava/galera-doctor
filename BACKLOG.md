@@ -77,37 +77,22 @@ touching this file, or CI will fail.
   `GD_TEST_DSN`, because an information_schema join that is subtly wrong looks
   perfect from a fixture. <!-- gd: prio=high size=S labels=tests ver=0.1.0 -->
 
-## M2 — Deeper into the cluster <!-- ms: target=v0.2.0 phase=later -->
+## M2 — Deeper into the cluster <!-- ms: target=v0.2.0 phase=shipped -->
 
 - [x] **GD-13 — Application schema drift**: the same fingerprint comparison for
   the application schemas. Galera *does* replicate that DDL, so a difference
   means a failed or half-applied schema change — a different diagnosis from
   GD-2 and worth its own check.
   <!-- gd: prio=high size=M labels=check ver=0.2.0 -->
-- [ ] **GD-14 — Backup freshness**: a dump on disk is not a backup that left the
-  building. Check the age of the local dump *and* whether it reached its
-  off-site destination, because the first without the second is the failure
-  everybody discovers at the worst moment. **Parked**: this needs the
-  filesystem and the off-site destination, and this tool only speaks read-only
-  SQL to nodes — as written it is a generic backup check and belongs in
-  [checkfleet](https://github.com/Allan-Nava/checkfleet). It earns its place
-  here only in a form that reads backup metadata out of a table named in the
-  config. <!-- gd: prio=high size=M labels=check -->
-- [ ] **GD-15 — SST/IST history**: read the recent state transfers from the
-  error log or the status counters, so a cluster that quietly full-syncs a node
-  every week is visible. **Parked**: MariaDB exposes no state-transfer
-  counters, so this needs the error log — outside the SQL channel. GD-52 (a
-  node that restarted between runs) is the part of it that *is* reachable.
-  <!-- gd: prio=med size=L labels=check -->
 - [x] **GD-16 — Node clock skew**: compare each node's clock with the auditing
   host. Certification and log correlation both suffer, and it is one query.
   <!-- gd: prio=med size=S labels=check ver=0.5.0 -->
 - [x] **GD-17 — Cross-DC latency from the cluster's own numbers**: segment
   configuration versus the observed apply and send queues, to say whether a
   node is slow or simply far away. <!-- gd: prio=med size=L labels=check ver=0.8.0 -->
-- [ ] **GD-18 — Watch mode**: re-audit on an interval and print only the
+- [x] **GD-18 — Watch mode**: re-audit on an interval and print only the
   transitions, for the window in which a cluster is being repaired.
-  <!-- gd: prio=low size=M labels=cli -->
+  <!-- gd: prio=low size=M labels=cli ver=0.12.0 -->
 
 ## M3 — Fit the toolchain <!-- ms: target=v0.3.0 phase=later -->
 
@@ -357,3 +342,27 @@ cluster cannot see a write path it is not part of.
   views of the same membership, and a node that believes it is a member while
   the group has not listed it is a state no single node can report.
   <!-- gd: prio=low size=M labels=collect,check -->
+
+## M8 — Parked, and why <!-- ms: target=v2.0.0 phase=later -->
+
+Not a queue. These are items that were written down before it was clear they
+cannot be done through the channel this tool has — read-only SQL to the nodes
+and to a ProxySQL admin interface — and they are kept here, with the reason,
+because an item that quietly disappears is an item somebody proposes again in
+six months. Each one names the form in which it *would* earn its place.
+
+- [ ] **GD-14 — Backup freshness**: a dump on disk is not a backup that left the
+  building. Check the age of the local dump *and* whether it reached its
+  off-site destination, because the first without the second is the failure
+  everybody discovers at the worst moment. **Parked**: this needs the
+  filesystem and the off-site destination, and this tool only speaks read-only
+  SQL to nodes — as written it is a generic backup check and belongs in
+  [checkfleet](https://github.com/Allan-Nava/checkfleet). It earns its place
+  here only in a form that reads backup metadata out of a table named in the
+  config. <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-15 — SST/IST history**: read the recent state transfers from the
+  error log or the status counters, so a cluster that quietly full-syncs a node
+  every week is visible. **Parked**: MariaDB exposes no state-transfer
+  counters, so this needs the error log — outside the SQL channel. GD-52 (a
+  node that restarted between runs) is the part of it that *is* reachable.
+  <!-- gd: prio=med size=L labels=check -->

@@ -147,6 +147,26 @@ moved rather than repeating itself:
   OK    audit/changes   compress   since the previous run (17m0s ago) — cleared: systables/drift@mysql.column_stats; appeared: flow/paused@sg-01 (WARN)
 ```
 
+## While you are repairing it
+
+```console
+$ galera-doctor audit --config clusters.json --watch 10s
+BAD   compress  3 node(s)
+  BAD   cluster/uuid    compress  nodes report different cluster state UUIDs: …
+  …
+16:34:48  OK    cluster/uuid   compress/compress  all nodes report one cluster  [BAD → OK]
+16:35:18  WARN  node/state     compress/ov-03     local state is Donor/Desynced  [OK → WARN]
+```
+
+The first report in full, so you know where you are starting from, and after
+that **only what moved** — including a finding that went away, which during a
+repair is usually the line you are waiting for. A tick that changed nothing
+prints nothing: reprinting twenty OK lines every ten seconds buries the one
+that matters.
+
+Still not a daemon and still not a monitoring system: it runs in the
+foreground, holds its baseline in memory, and stops when you do.
+
 ## Configuration
 
 ```json
@@ -216,6 +236,7 @@ attestation (`gh attestation verify`), built by the tag itself. See
 | `--json` | everything |
 | `--findings` | the flat findings array the sibling tools speak — empty array, never `null` |
 | `--min-severity S` | hide findings below `S`; the cluster header stays |
+| `--watch D` | the first report in full, then only what changed, every `D` |
 
 | Exit | Meaning |
 |---|---|

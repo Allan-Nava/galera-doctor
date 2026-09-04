@@ -6,6 +6,50 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.12.0] - 2026-09-04
+
+M2 is finished: everything in it that can be done through this tool's channel
+is done, and the two items that cannot are in M8 with the reason.
+
+### Added
+
+- **`--watch D`** (GD-18) — re-audit on an interval and print only the
+  transitions, for the window in which somebody is repairing a cluster. The
+  first report in full, so they know where they are starting from, and after
+  that only what moved, with the status it moved from: `[BAD → OK]`. A tick
+  that changed nothing prints nothing — reprinting twenty `OK` lines every ten
+  seconds buries the one that matters.
+
+  A finding that **disappeared** is a transition too, and during a repair it is
+  usually the line somebody is waiting for; an `OK` that stopped being reported
+  is not, because the check simply did not run this time. Running it against a
+  real server is what found that gap: killing the server printed the new
+  `node/read` error and said nothing about the finding that had gone.
+
+  It refuses an interval under a second, which is a busy loop against a cluster
+  that is already having a bad day, and refuses `--json` and `--findings`,
+  which emit one document per run — a stream of documents is not a document.
+  `--watch 0` is a usage error rather than "watching, disabled": `fs.Visit` is
+  what tells a flag that was typed apart from one that was left out.
+
+  Still not a daemon and not a monitoring system, which
+  [INTENT.md](INTENT.md) rules out: it runs in the foreground, holds its
+  baseline in memory, and stops when the person watching it stops. The loop is
+  driven by a channel rather than a ticker so it can be tested — an untested
+  loop is how "it printed nothing" becomes "it printed nothing because it never
+  ran".
+
+### Changed
+
+- **M2 is shipped, and M8 says why the rest is not** — `GD-14` (backup
+  freshness) and `GD-15` (SST/IST history) moved to **M8 — Parked, and why**.
+  Neither can be done through read-only SQL to the nodes: one needs the
+  filesystem and an off-site destination, the other needs the error log because
+  MariaDB exposes no state-transfer counters. M8 is not a queue — it is where
+  an item goes with the reason it cannot be built and the form in which it
+  would earn its place, because an item that quietly disappears is one somebody
+  proposes again in six months.
+
 ## [0.11.0] - 2026-09-04
 
 M7's high-priority half: the write paths a cluster diagram does not show.

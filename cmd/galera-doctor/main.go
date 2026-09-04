@@ -13,6 +13,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -77,6 +78,7 @@ flags:
   --clock-bad D            ... and to call BAD (default 30s)
   --latency-floor D        replication latency below which a difference inside
                            a segment is noise (default 2ms)
+  --watch D                re-audit every D and print only the transitions
   --json                   full report
   --findings               flat findings array
   --min-severity S         hide findings below S (OK|WARN|BAD|ERROR)
@@ -179,6 +181,7 @@ func cmdAudit(args []string) int {
 		clockWarn   = fs.Duration("clock-warn", 2*time.Second, "spread between node clocks to WARN at")
 		latFloor    = fs.Duration("latency-floor", 2*time.Millisecond, "replication latency below which a difference inside a segment is noise")
 		clockBad    = fs.Duration("clock-bad", 30*time.Second, "spread between node clocks to call BAD")
+		watchEvery  = fs.Duration("watch", 0, "re-audit on this interval and print only the transitions")
 		asJSON      = fs.Bool("json", false, "full JSON report")
 		asFindings  = fs.Bool("findings", false, "flat findings array")
 		minSev      = fs.String("min-severity", "", "hide findings below this status")
@@ -189,6 +192,21 @@ func cmdAudit(args []string) int {
 	}
 	for _, s := range []string{*minSev, *exitOn} {
 		if err := validStatus(s); err != nil {
+			fmt.Fprintln(os.Stderr, "galera-doctor:", err)
+			return 2
+		}
+	}
+	// `--watch 0` and no --watch at all are the same value, and they are not
+	// the same instruction: one is a mistake worth refusing, the other is the
+	// default. fs.Visit is what tells them apart.
+	watching := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "watch" {
+			watching = true
+		}
+	})
+	if watching {
+		if err := validWatch(*watchEvery, *asJSON, *asFindings); err != nil {
 			fmt.Fprintln(os.Stderr, "galera-doctor:", err)
 			return 2
 		}
@@ -240,31 +258,69 @@ func cmdAudit(args []string) int {
 	opt.LatencyFloor = *latFloor
 	opt.Now = time.Now()
 
-	var reps []audit.Report
-	merged := state.State{Version: state.Version, At: opt.Now, Nodes: map[string]state.NodeState{}}
-	for _, name := range sortedKeys(targets) {
-		c := targets[name]
-		snaps := collector.CollectAll(ctx, c.Nodes)
-		o := opt
-		o.Cluster = name
-		o.ExpectNodes = c.ExpectNodes
-		if *expect != 0 {
-			o.ExpectNodes = *expect
+	// One pass over every target: collect, audit, persist. Extracted so watch
+	// mode can call it on a tick without a second copy of any of it.
+	runOnce := func() []audit.Report {
+		var reps []audit.Report
+		opt.Now = time.Now()
+		merged := state.State{Version: state.Version, At: opt.Now, Nodes: map[string]state.NodeState{}}
+		for _, name := range sortedKeys(targets) {
+			c := targets[name]
+			snaps := collector.CollectAll(ctx, c.Nodes)
+			o := opt
+			o.Cluster = name
+			o.ExpectNodes = c.ExpectNodes
+			if *expect != 0 {
+				o.ExpectNodes = *expect
+			}
+			// The state file namespaces everything by cluster; the audit asks
+			// about bare node names, so it gets this cluster's view of it.
+			rep := audit.Run(snaps, prev.Scope(name), o)
+			dsn := c.ProxySQLDSN
+			if *proxyDSN != "" {
+				dsn = *proxyDSN
+			}
+			if dsn != "" {
+				rep.Findings = append(rep.Findings, proxysql.Audit(proxysql.Collect(ctx, dsn, *timeout), snaps)...)
+				finding.SortWorstFirst(rep.Findings)
+			}
+			merged.Merge(name, rep.State)
+			reps = append(reps, rep)
 		}
-		// The state file namespaces everything by cluster; the audit asks
-		// about bare node names, so it gets this cluster's view of it.
-		rep := audit.Run(snaps, prev.Scope(name), o)
-		dsn := c.ProxySQLDSN
-		if *proxyDSN != "" {
-			dsn = *proxyDSN
+
+		// The state file is written here and never blocks the output: a failure to
+		// persist a baseline costs the next run its rates, nothing more. In watch
+		// mode the baseline is also held in memory, so a missing file costs
+		// nothing at all.
+		if err := state.Save(*statePath, merged); err != nil {
+			fmt.Fprintln(os.Stderr, "galera-doctor: could not write the state file:", err)
 		}
-		if dsn != "" {
-			rep.Findings = append(rep.Findings, proxysql.Audit(proxysql.Collect(ctx, dsn, *timeout), snaps)...)
-			finding.SortWorstFirst(rep.Findings)
-		}
-		merged.Merge(name, rep.State)
-		reps = append(reps, rep)
+		// Each pass reads the state it just wrote, so a watch loop grades rates
+		// over its own interval rather than over the whole session.
+		prev = &merged
+		return reps
 	}
+
+	// A loop, in the foreground, printing only what moved: the window this is
+	// for is the one in which somebody is repairing a cluster. Still not a
+	// daemon and still not a monitoring system — it stops when the person
+	// watching it stops.
+	if watching {
+		ticker := time.NewTicker(*watchEvery)
+		defer ticker.Stop()
+		ticks := make(chan time.Time)
+		go func() {
+			// The first tick is now: nobody wants to wait an interval to see
+			// where the cluster is starting from.
+			ticks <- time.Now()
+			for t := range ticker.C {
+				ticks <- t
+			}
+		}()
+		return watch(os.Stdout, ticks, runOnce)
+	}
+
+	reps := runOnce()
 
 	switch {
 	case *asFindings:
@@ -281,12 +337,6 @@ func cmdAudit(args []string) int {
 		return 2
 	}
 
-	// The state file is written last and never blocks the output: a failure to
-	// persist a baseline costs the next run its rates, nothing more.
-	if err := state.Save(*statePath, merged); err != nil {
-		fmt.Fprintln(os.Stderr, "galera-doctor: could not write the state file:", err)
-	}
-
 	if *exitOn != "" {
 		for _, r := range reps {
 			if finding.AtLeast(r.Worst(), finding.Status(*exitOn)) {
@@ -295,6 +345,49 @@ func cmdAudit(args []string) int {
 		}
 	}
 	return 0
+}
+
+// watch re-audits on every tick and prints the first report in full, then
+// only the transitions (GD-18).
+//
+// It is driven by a channel rather than by a ticker so it can be tested: a
+// loop that only stops on a signal cannot be, and an untested loop is how
+// "it printed nothing" becomes "it printed nothing because it never ran". It
+// returns when the channel closes.
+func watch(w io.Writer, ticks <-chan time.Time, run func() []audit.Report) int {
+	prev := map[string]string{}
+	baseline := true
+	for t := range ticks {
+		reps := run()
+		if baseline {
+			// Where we are starting from, in full: the transitions afterwards
+			// only mean something against it.
+			if err := output.Text(w, reps, ""); err != nil {
+				fmt.Fprintln(os.Stderr, "galera-doctor:", err)
+				return 2
+			}
+			baseline = false
+		} else if _, err := output.Changed(w, reps, prev, t); err != nil {
+			fmt.Fprintln(os.Stderr, "galera-doctor:", err)
+			return 2
+		}
+		prev = output.Statuses(reps)
+	}
+	return 0
+}
+
+// validWatch is the interval and the renderers it can be combined with. It is
+// only called when --watch was actually given, so a zero here was typed.
+func validWatch(every time.Duration, asJSON, asFindings bool) error {
+	// Shorter than one audit takes is a busy loop against a cluster that is
+	// already having a bad day.
+	if every < time.Second {
+		return fmt.Errorf("--watch %s is too short: give it at least a second", every)
+	}
+	if asJSON || asFindings {
+		return fmt.Errorf("--watch prints transitions for a person to read; --json and --findings emit one document per run, and a stream of them is not a document")
+	}
+	return nil
 }
 
 func sortedKeys(m map[string]config.Cluster) []string {
