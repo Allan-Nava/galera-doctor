@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0 # goreleaser wants the history
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.27"
 
       - name: The tag being released
         id: v
