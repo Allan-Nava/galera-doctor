@@ -40,126 +40,6 @@ assert_contains() {
 }
 
 # ---------------------------------------------------------------------------
-# The matrix. Six platforms, and the two that people actually run this from —
-# an Apple laptop and a Linux jump host — must be in it.
-# ---------------------------------------------------------------------------
-checks=$((checks + 1))
-if (cd "$root" && sh "$script" matrix) >"$tmp/matrix.txt" 2>&1; then
-	pass "the matrix can be listed"
-else
-	fail "scripts/release.sh matrix failed"
-	sed 's/^/       /' "$tmp/matrix.txt" >&2
-fi
-
-for want in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
-	assert_contains "the matrix covers $want" "$want" "$tmp/matrix.txt"
-done
-
-checks=$((checks + 1))
-if [ "$(grep -c . "$tmp/matrix.txt")" -ge 4 ]; then
-	pass "the matrix is not a single platform"
-else
-	fail "the matrix has $(grep -c . "$tmp/matrix.txt") entries"
-fi
-
-# Every entry is os/arch, or the build loop silently produces nonsense names.
-checks=$((checks + 1))
-if grep -qvE '^[a-z0-9]+/[a-z0-9]+$' "$tmp/matrix.txt"; then
-	fail "the matrix has an entry that is not os/arch"
-	sed 's/^/       /' "$tmp/matrix.txt" >&2
-else
-	pass "every matrix entry is os/arch"
-fi
-
-# ---------------------------------------------------------------------------
-# A build for the host platform only: names, checksums, and the version that
-# ends up inside the binary.
-# ---------------------------------------------------------------------------
-host="$(go env GOOS)/$(go env GOARCH)"
-checks=$((checks + 1))
-if (cd "$root" && GD_RELEASE_MATRIX="$host" sh "$script" build v9.9.9 "$tmp/dist") >"$tmp/build.txt" 2>&1; then
-	pass "a build succeeds"
-else
-	fail "the build failed"
-	sed 's/^/       /' "$tmp/build.txt" >&2
-	echo "$failures of $checks checks failed" >&2
-	exit 1
-fi
-
-archive="galera-doctor_9.9.9_$(go env GOOS)_$(go env GOARCH).tar.gz"
-checks=$((checks + 1))
-if [ -f "$tmp/dist/$archive" ]; then
-	pass "the archive is named for the version and the platform"
-else
-	fail "no $archive in the output"
-	ls -la "$tmp/dist" >&2
-fi
-
-# The checksum file is what people verify against, so it has to match the bytes
-# that were actually written — and cover every archive, not the last one.
-checks=$((checks + 1))
-if [ -f "$tmp/dist/SHA256SUMS" ]; then
-	pass "SHA256SUMS is written"
-else
-	fail "no SHA256SUMS"
-fi
-checks=$((checks + 1))
-if (cd "$tmp/dist" && shasum -a 256 -c SHA256SUMS >/dev/null 2>&1 ||
-	sha256sum -c SHA256SUMS >/dev/null 2>&1); then
-	pass "SHA256SUMS verifies against the archives"
-else
-	fail "SHA256SUMS does not verify"
-	cat "$tmp/dist/SHA256SUMS" >&2
-fi
-checks=$((checks + 1))
-if [ "$(grep -c . "$tmp/dist/SHA256SUMS")" -eq "$(ls "$tmp/dist"/*.tar.gz | wc -l | tr -d ' ')" ]; then
-	pass "every archive has a line in SHA256SUMS"
-else
-	fail "SHA256SUMS covers $(grep -c . "$tmp/dist/SHA256SUMS") of $(ls "$tmp/dist"/*.tar.gz | wc -l | tr -d ' ') archives"
-fi
-
-# A binary that reports "dev" is a binary nobody can place in a ticket.
-checks=$((checks + 1))
-(cd "$tmp/dist" && tar xzf "$archive")
-if "$tmp/dist/galera-doctor" version >"$tmp/version.txt" 2>&1 &&
-	grep -qF "9.9.9" "$tmp/version.txt"; then
-	pass "the version is compiled into the binary"
-else
-	fail "the binary does not report the release version"
-	sed 's/^/       /' "$tmp/version.txt" >&2
-fi
-
-# The archive carries the licence and the readme with it: a binary in a
-# download folder is separated from its repository forever.
-for extra in LICENSE README.md; do
-	checks=$((checks + 1))
-	if tar tzf "$tmp/dist/$archive" | grep -qxF "$extra"; then
-		pass "the archive carries $extra"
-	else
-		fail "$extra is not in the archive"
-		tar tzf "$tmp/dist/$archive" >&2
-	fi
-done
-
-# ---------------------------------------------------------------------------
-# Usage errors: a release built without a version is the one mistake that must
-# not produce artefacts at all.
-# ---------------------------------------------------------------------------
-checks=$((checks + 1))
-if (cd "$root" && sh "$script" build) >"$tmp/usage.txt" 2>&1; then
-	fail "a build without a version exited 0"
-else
-	pass "a build without a version is a usage error"
-fi
-
-checks=$((checks + 1))
-if (cd "$root" && sh "$script" publish) >/dev/null 2>&1; then
-	fail "an unknown subcommand exited 0"
-else
-	pass "an unknown subcommand is a usage error"
-fi
-
-# ---------------------------------------------------------------------------
 # The release notes are lifted from CHANGELOG.md, not retyped. A release whose
 # notes say "see the changelog" is a release nobody reads, and a release built
 # from a version with no changelog section at all is a version somebody forgot
@@ -234,140 +114,134 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# The container image name.
-#
-# Every release from v0.3.0 to v0.5.1 published its archives and failed to
-# publish an image, with one error: `invalid tag
-# "ghcr.io/Allan-Nava/galera-doctor:0.5.1": repository name must be lowercase`.
-# github.repository_owner is spelled the way the account is spelled, and a
-# registry does not accept a capital letter. actionlint cannot see this; the
-# only thing that can is a check that the name is lowercased before it reaches
-# a tag, and that the docs name the same image.
+# Building, packaging and publishing are goreleaser's now — the same
+# configuration shape as checkfleet, so one person can read both. What is
+# checked here is everything that would fail *silently*: a cask that goes to
+# the wrong tap, a checksum file renamed out from under the documented download
+# command, an image tag that never becomes a manifest.
 # ---------------------------------------------------------------------------
-workflow="$root/.github/workflows/release.yml"
+config="$root/.goreleaser.yaml"
 
 checks=$((checks + 1))
-if grep -qE 'ghcr\.io/\$\{\{ *github\.repository(_owner)? *\}\}' "$workflow"; then
-	fail "an image tag interpolates the owner directly — it is spelled Allan-Nava and a registry wants lowercase"
-	grep -nE 'ghcr\.io/' "$workflow" | sed 's/^/       /' >&2
-else
-	pass "no image tag interpolates the repository owner directly"
+if [ -f "$config" ]; then pass "there is a goreleaser configuration"; else
+	fail "no .goreleaser.yaml"
+	echo "$failures of $checks checks failed" >&2
+	exit 1
 fi
 
 checks=$((checks + 1))
-if grep -qE "tr '?A-Z'? '?a-z'?|,,}" "$workflow"; then
-	pass "the image name is lowercased before it is used"
-else
-	fail "nothing in the workflow lowercases the image name"
-fi
-
-# The name in the workflow and the name in the docs have to be the same string,
-# or the docs point at an image that does not exist.
-checks=$((checks + 1))
-if grep -qF "ghcr.io/allan-nava/galera-doctor" "$root/docs/install.md" &&
-	grep -qF "ghcr.io/allan-nava/galera-doctor" "$root/README.md"; then
-	pass "the docs name the lowercase image"
-else
-	fail "the docs do not name ghcr.io/allan-nava/galera-doctor"
-fi
-
-# ---------------------------------------------------------------------------
-# Publishing has to be repeatable. The first attempt at v0.5.1 created the
-# release and then failed elsewhere; re-running the workflow for that tag must
-# fix the release rather than fail on "already exists".
-# ---------------------------------------------------------------------------
-checks=$((checks + 1))
-if grep -qE 'gh release (view|edit)' "$workflow" && grep -qF -- "--clobber" "$workflow"; then
-	pass "a release that already exists is updated, not refused"
-else
-	fail "re-running the workflow for an existing tag would fail on gh release create"
-fi
-
-# ---------------------------------------------------------------------------
-# The Homebrew formula is generated, committed and published by the workflow —
-# and until now nothing ever installed it. A formula with a correct-looking
-# sha256 and a wrong url, a platform block that never matches, or a test block
-# that fails, would sit on main and break on somebody's laptop instead of in
-# CI. So the release has to install what it just published, on a real macOS
-# runner, and the tap has to be checked periodically because a release asset
-# can be deleted long after the run that made it went green.
-# ---------------------------------------------------------------------------
-brew_workflow="$root/.github/workflows/brew.yml"
-
-# The brew job's own lines. An awk range like /^  brew:/,/^  [a-z]/ matches a
-# single line, because the start line satisfies the end pattern too — the flag
-# is what makes this the job rather than its heading.
-brew_job() {
-	awk '/^  brew:/ { f = 1; next } f && /^  [a-z_-]+:/ { f = 0 } f' "$workflow"
-}
-
-checks=$((checks + 1))
-if grep -qE '^  brew:' "$workflow"; then
-	pass "the release has a brew job"
-else
-	fail "nothing in the release workflow installs the formula it publishes"
-fi
-
-checks=$((checks + 1))
-if brew_job | grep -qE 'runs-on: *macos'; then
-	pass "and it runs on macOS, where brew installs are real"
-else
-	fail "the brew job does not run on macOS"
-fi
-
-checks=$((checks + 1))
-if brew_job | grep -qF "needs: artifacts"; then
-	pass "it waits for the release to exist"
-else
-	fail "the brew job does not wait for the archives to be published"
-fi
-
-for want in "brew install" "brew test" "brew style"; do
-	checks=$((checks + 1))
-	if brew_job | grep -qF -e "$want"; then
-		pass "the brew job runs $want"
+if command -v goreleaser >/dev/null 2>&1; then
+	if (cd "$root" && goreleaser check) >"$tmp/grcheck.txt" 2>&1; then
+		pass "goreleaser accepts the configuration"
 	else
-		fail "the brew job never runs $want"
+		fail "goreleaser check failed"
+		sed 's/^/       /' "$tmp/grcheck.txt" >&2
+	fi
+else
+	pass "goreleaser accepts the configuration (skipped: goreleaser not installed)"
+fi
+
+# The download instructions in docs/install.md name SHA256SUMS. goreleaser
+# calls it checksums.txt unless told otherwise, and a rename would break every
+# published verify command without failing anything.
+has_config() {
+	checks=$((checks + 1))
+	if grep -qF -e "$2" "$config"; then pass "$1"; else
+		fail "$1 — missing from .goreleaser.yaml: $2"
+	fi
+}
+has_config "the checksum file keeps the documented name" "SHA256SUMS"
+has_config "the archives are named as the docs say" "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+has_config "the version is stamped into the binary" "-X main.version={{ .Version }}"
+has_config "the binary is static" "CGO_ENABLED=0"
+
+# The cask, and the tap it goes to. A cask published to the wrong repository is
+# a brew install that installs somebody else's tool.
+has_config "there is a Homebrew cask" "homebrew_casks:"
+has_config "it goes to the shared tap" "name: homebrew-tap"
+has_config "with the token that can write there" "HOMEBREW_TAP_GITHUB_TOKEN"
+# An unsigned binary is quarantined by Gatekeeper: without the hook the cask
+# installs and macOS refuses to run it.
+has_config "the quarantine attribute is stripped on install" "com.apple.quarantine"
+# A prerelease tag must not push a cask: brew install would hand every user a
+# release candidate.
+has_config "a prerelease publishes no cask" 'skip_upload: "auto"'
+
+# The bug that failed four releases in a row: ghcr refuses a capital letter,
+# and github.repository_owner is spelled Allan-Nava. The image names are
+# literals in this file now, so the assertion is that they are lowercase.
+checks=$((checks + 1))
+# {{ .Version }} is a template, not part of the name, so it is stripped
+# before looking — otherwise its capital V fails the check it is not part of.
+if grep -oE 'ghcr\.io/[^"]*' "$config" | sed 's/{{[^}]*}}//g' | grep -q '[A-Z]'; then
+	fail "an image name has a capital letter: a registry refuses that"
+	grep -oE 'ghcr\.io/[^"]*' "$config" | sed 's/{{[^}]*}}//g' | grep '[A-Z]' | sed 's/^/       /' >&2
+else
+	pass "every image name is lowercase"
+fi
+
+# Publishing has to be repeatable: the first attempt at a tag can create the
+# release and fail afterwards, and re-running must fix that release rather than
+# stop because it exists.
+has_config "a release that already exists is replaced, not refused" "mode: replace"
+
+has_config "the image is built for both architectures" "docker_manifests:"
+has_config "and the manifest carries the version" "ghcr.io/allan-nava/galera-doctor:{{ .Version }}"
+
+checks=$((checks + 1))
+if grep -qF "Dockerfile.release" "$config" && [ -f "$root/Dockerfile.release" ]; then
+	pass "goreleaser has a Dockerfile that takes the prebuilt binary"
+else
+	fail "the image build has no Dockerfile.release (goreleaser injects the binary, it does not compile it)"
+fi
+
+# The hand-rolled formula machinery has to be gone, not left beside its
+# replacement: two things generating a brew install is how they drift.
+for gone in scripts/brew.sh scripts/brew_test.sh Formula/galera-doctor.rb; do
+	checks=$((checks + 1))
+	if [ -e "$root/$gone" ]; then
+		fail "$gone is still here, next to the cask that replaced it"
+	else
+		pass "$gone is gone"
 	fi
 done
 
-# Installing is not proof the right thing was installed.
-checks=$((checks + 1))
-if brew_job | grep -qF "galera-doctor version"; then
-	pass "and asserts the installed binary reports the released version"
-else
-	fail "nothing checks that the installed binary is the released one"
-fi
-
-# The tap is a published thing with a life after the release run.
-checks=$((checks + 1))
-if [ -f "$brew_workflow" ]; then
-	pass "there is a workflow for the published tap"
-else
-	fail "no .github/workflows/brew.yml: nothing ever checks the tap again"
-fi
+# ---------------------------------------------------------------------------
+# The tap check. checkfleet learned this the hard way twice, and both lessons
+# are asserted here rather than rediscovered.
+# ---------------------------------------------------------------------------
+brew_workflow="$root/.github/workflows/brew.yml"
 
 checks=$((checks + 1))
-if [ -f "$brew_workflow" ] && grep -qF "schedule:" "$brew_workflow"; then
-	pass "the tap is checked on a schedule, not only when somebody remembers"
-else
-	fail "the tap check has no schedule"
+if [ -f "$brew_workflow" ]; then pass "there is a tap workflow"; else
+	fail "no .github/workflows/brew.yml"
 fi
 
+has_brew() {
+	checks=$((checks + 1))
+	if [ -f "$brew_workflow" ] && grep -qF -e "$2" "$brew_workflow"; then pass "$1"; else
+		fail "$1 — missing from brew.yml: $2"
+	fi
+}
+has_brew "it installs the cask the way the docs say to" "brew install --cask Allan-Nava/tap/galera-doctor"
+has_brew "it runs after a release" "workflow_run"
+has_brew "on a schedule too" "schedule:"
+has_brew "and on demand" "workflow_dispatch"
+# CF-159: macos-13 was retired, and a job asking for a label with no runners
+# behind it does not fail — it queues forever, so the workflow never concludes
+# and in practice verifies nothing.
+has_brew "the Intel leg uses an image that still exists" "macos-15-intel"
 checks=$((checks + 1))
-if [ -f "$brew_workflow" ] && grep -qF "workflow_dispatch" "$brew_workflow"; then
-	pass "and can be run by hand"
+if [ -f "$brew_workflow" ] && grep -qE '^ *- *macos-13' "$brew_workflow"; then
+	fail "macos-13 was retired: that leg queues forever instead of failing"
 else
-	fail "the tap check cannot be run on demand"
+	pass "no retired runner label"
 fi
-
-# The real user path, not a local file: brew tap <url> && brew install.
-checks=$((checks + 1))
-if [ -f "$brew_workflow" ] && grep -qF "brew tap" "$brew_workflow"; then
-	pass "the tap check installs the way the docs say to"
-else
-	fail "the tap check does not go through brew tap"
-fi
+# The check that actually matters: installing *something* proves nothing when
+# the cask on the tap is stale.
+has_brew "it asserts the tap serves the latest release" "releases/latest"
+has_brew "and that Gatekeeper will let the binary run" "com.apple.quarantine"
+has_brew "a hung install fails instead of looking busy" "timeout-minutes"
 
 echo
 if [ "$failures" -gt 0 ]; then

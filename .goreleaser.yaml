@@ -1,0 +1,159 @@
+# Building, packaging and publishing, in the same shape as checkfleet — one
+# configuration a person can read across both repositories.
+#
+# What is deliberately not goreleaser's: the release notes. They are lifted
+# from CHANGELOG.md by scripts/release.sh and handed over with
+# --release-notes, because a changelog written for people beats a list of
+# commit subjects.
+version: 2
+
+project_name: galera-doctor
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: galera-doctor
+    main: ./cmd/galera-doctor
+    binary: galera-doctor
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [linux, darwin, freebsd, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: freebsd
+        goarch: arm64
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # The name docs/install.md tells people to download.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # A binary in a download folder is separated from its repository forever.
+    files:
+      - README.md
+      - LICENSE*
+      - CHANGELOG.md
+      - docs/clusters.example.json
+
+checksum:
+  # Not goreleaser's checksums.txt default: every published verify command, and
+  # the release archive section of docs/install.md, names this file.
+  name_template: "SHA256SUMS"
+
+# The image is scratch-adjacent by design: distroless static, no shell, non-root,
+# with the CA bundle a TLS DSN needs. Dockerfile.release takes the binary
+# goreleaser already built; Dockerfile stays the from-source build a human runs.
+dockers:
+  - id: amd64
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.release
+    use: buildx
+    image_templates:
+      - "ghcr.io/allan-nava/galera-doctor:{{ .Version }}-amd64"
+      - "ghcr.io/allan-nava/galera-doctor:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/Allan-Nava/galera-doctor"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+  - id: arm64
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.release
+    use: buildx
+    image_templates:
+      - "ghcr.io/allan-nava/galera-doctor:{{ .Version }}-arm64"
+      - "ghcr.io/allan-nava/galera-doctor:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/Allan-Nava/galera-doctor"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+docker_manifests:
+  - name_template: "ghcr.io/allan-nava/galera-doctor:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/allan-nava/galera-doctor:{{ .Version }}-amd64"
+      - "ghcr.io/allan-nava/galera-doctor:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/allan-nava/galera-doctor:latest"
+    image_templates:
+      - "ghcr.io/allan-nava/galera-doctor:latest-amd64"
+      - "ghcr.io/allan-nava/galera-doctor:latest-arm64"
+
+# An SBOM per archive, and keyless signatures over the checksum file and the
+# images: a download can be traced back to the run that produced it.
+sboms:
+  - id: archives
+    artifacts: archive
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+
+docker_signs:
+  - cmd: cosign
+    args:
+      - sign
+      - "--yes"
+      - "${artifact}"
+    artifacts: all
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+homebrew_casks:
+  - name: galera-doctor
+    repository:
+      owner: Allan-Nava
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/Allan-Nava/galera-doctor"
+    description: "Read-only audit of a Galera cluster: the states its own metrics cannot show"
+    # The binary is not signed, so Gatekeeper quarantines it and macOS refuses
+    # to run it — the cask installs cleanly and the tool never starts. Strip
+    # the attribute on install, the same way the sibling tools do.
+    hooks:
+      post:
+        install: |
+          if system_command "/usr/bin/xattr", args: ["-h"], print_stderr: false
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/galera-doctor"]
+          end
+    # "auto" = publish on a normal tag, skip on a prerelease. Without it a
+    # v1.0.0-rc.1 would push its cask to the tap and `brew install` would hand
+    # every user a release candidate — the opposite of what an rc is for.
+    skip_upload: "auto"
+
+release:
+  draft: false
+  prerelease: auto
+  # A tag whose first attempt created the release and then failed has to be
+  # re-runnable: replace the artefacts rather than refusing because the release
+  # exists. Four releases in this repository's history needed exactly that.
+  mode: replace

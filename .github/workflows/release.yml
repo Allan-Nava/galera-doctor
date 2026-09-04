@@ -1,36 +1,40 @@
 name: Release
 
-# A tag is the trigger and the version: scripts/release.sh builds the same
-# artefacts a maintainer can build by hand, and scripts/brew.sh renders the
-# formula from the checksums this run produced rather than from a number
-# somebody retyped.
+# A tag builds it all, through goreleaser — the same shape as the sibling
+# tools, so one person can read both. The notes are the exception: they come
+# from CHANGELOG.md via scripts/release.sh, because a changelog written for
+# people beats a list of commit subjects.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.2.1)"
+        description: "Tag to release (e.g. v0.9.1)"
         required: true
 
 permissions:
   contents: read
 
+# Serialize releases: goreleaser pushes the mutable latest-amd64 / latest-arm64
+# tags on every release, and two runs at once clobber each other's, after which
+# the :latest manifest cannot verify its digest. Queue them; never cancel, since
+# every tag has to release fully.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  artifacts:
+  goreleaser:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # the release, and the generated formula
-      id-token: write # provenance
-      attestations: write
+      contents: write # the release, and the archives on it
+      packages: write # the image on ghcr.io
+      id-token: write # keyless cosign signing through GitHub OIDC
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # goreleaser wants the history
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
@@ -43,163 +47,40 @@ jobs:
       # release: the tag is permanent.
       - run: go test -race ./...
 
-      - name: Build every platform
-        run: ./scripts/release.sh build "${{ steps.v.outputs.tag }}" dist
-
+      # Written up before it is published, or the release page says nothing.
       - name: Release notes, lifted from CHANGELOG.md
         run: ./scripts/release.sh notes "${{ steps.v.outputs.tag }}" >notes.md
 
-      # What was built, signed by the workflow that built it. `gh attestation
-      # verify` checks a downloaded archive against this.
-      - uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: dist/*.tar.gz
-
-      # Publishing has to be repeatable: the first attempt at a tag can create
-      # the release and then fail somewhere else, and re-running the workflow
-      # must fix that release rather than stop at "already exists".
-      - name: Publish the release
+      # Without this the cask step fails inside goreleaser with a template
+      # error about an empty environment variable, which reads like a
+      # goreleaser bug rather than a missing secret.
+      - name: The tap token has to be here
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.v.outputs.tag }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "the release exists — updating it"
-            gh release edit "$TAG" \
-              --title "galera-doctor $TAG" \
-              --notes-file notes.md
-            gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber
-          else
-            gh release create "$TAG" \
-              --title "galera-doctor $TAG" \
-              --notes-file notes.md \
-              dist/*.tar.gz dist/SHA256SUMS
+          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_GITHUB_TOKEN is not set, so the Homebrew cask cannot be pushed to Allan-Nava/homebrew-tap."
+            echo "::error::Add a PAT with repo scope: gh secret set HOMEBREW_TAP_GITHUB_TOKEN --repo ${{ github.repository }}"
+            exit 1
           fi
 
-      # The formula is generated from this run's own SHA256SUMS. It lives in
-      # this repository, which is the tap: `brew tap Allan-Nava/galera-doctor
-      # https://github.com/Allan-Nava/galera-doctor`.
-      # scripts/brew.sh commit decides whether there is anything to commit —
-      # with git status, not git diff, which does not see a file that is not
-      # tracked yet. That is how the first release published a tap with no
-      # formula in it.
-      - name: Commit the Homebrew formula if it changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          ./scripts/brew.sh commit "${{ steps.v.outputs.tag }}" dist/SHA256SUMS
-          # A push with nothing new is a no-op, so this needs no second
-          # condition to get wrong.
-          git push origin HEAD:${{ github.event.repository.default_branch }}
-
-  # The formula is generated, committed and published by the job above — and
-  # nothing used to install it. A correct-looking sha256 on a wrong url, a
-  # platform block that never matches, a test block that fails: all of it would
-  # sit on main and break on somebody's laptop instead of here. So the release
-  # installs what it just published, on a real macOS runner, from the release's
-  # own SHA256SUMS rather than from the committed file — that is what a user
-  # gets, and it does not depend on the push having landed first.
-  brew:
-    needs: artifacts
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: The tag being released
-        id: v
-        run: echo "tag=${{ inputs.tag || github.ref_name }}" >>"$GITHUB_OUTPUT"
-
-      - name: Render the formula from the published release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.v.outputs.tag }}
-        run: |
-          gh release download "$TAG" --pattern SHA256SUMS --dir dist
-          ./scripts/brew.sh write "$TAG" dist/SHA256SUMS
-
-      # Deterministic, because the file is generated: if brew style has an
-      # opinion, the generator is what changes.
-      - name: brew style
-        run: brew style --formula Formula/galera-doctor.rb
-
-      - name: brew install
-        run: brew install --formula --verbose Formula/galera-doctor.rb
-
-      # The test block in the formula: it runs the binary, which is the only
-      # thing that proves the archive for this platform was the right one.
-      - name: brew test
-        run: brew test --formula Formula/galera-doctor.rb
-
-      - name: The installed binary is the released one
-        env:
-          TAG: ${{ steps.v.outputs.tag }}
-        run: |
-          got=$(galera-doctor version)
-          echo "$got"
-          case "$got" in
-          *"${TAG#v}") echo "ok: $got" ;;
-          *)
-            echo "::error::installed $got, expected version ${TAG#v}"
-            exit 1
-            ;;
-          esac
-          galera-doctor checks | head -3
-
-      # Homebrew's own audit is advisory here: it has rules for formulae in the
-      # core tap that a single-binary formula in its own tap cannot satisfy, and
-      # failing a release on those would teach everybody to ignore this job.
-      - name: brew audit
-        continue-on-error: true
-        run: brew audit --formula Formula/galera-doctor.rb
-
-  image:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@v4
-
-      # github.repository_owner is spelled the way the account is spelled —
-      # Allan-Nava — and a registry refuses a capital letter: every release
-      # from v0.3.0 to v0.5.1 published its archives and failed here with
-      # `repository name must be lowercase`. Lowercased once, used twice.
-      - name: The tag and the image name
-        id: v
-        env:
-          REPO: ${{ github.repository }}
-        run: |
-          tag="${{ inputs.tag || github.ref_name }}"
-          {
-            echo "tag=$tag"
-            echo "version=${tag#v}"
-            echo "image=ghcr.io/${REPO,,}"
-          } >>"$GITHUB_OUTPUT"
-
-      # The Dockerfile cross-compiles with the Go toolchain rather than under
-      # emulation, so arm64 costs a few seconds instead of several minutes.
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/build-push-action@v6
-        id: push
+      - uses: goreleaser/goreleaser-action@v6
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: VERSION=${{ steps.v.outputs.version }}
-          tags: |
-            ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
-            ${{ steps.v.outputs.image }}:latest
-
-      - uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: ${{ steps.v.outputs.image }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --release-notes=notes.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # A PAT with repo scope: pushing the cask writes to another
+          # repository, which the job's own token cannot do.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

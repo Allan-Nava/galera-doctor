@@ -128,8 +128,6 @@ jobs:
         run: sh scripts/site_test.sh
       - name: The About box tooling, against a fake gh
         run: sh scripts/repo_test.sh
-      - name: The Homebrew formula
-        run: sh scripts/brew_test.sh
       - name: The docs renderer
         run: sh scripts/docs_test.sh
       # The landing page's SEO is a set of tags nothing renders: a missing
@@ -156,6 +154,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/repo.sh check
+
+  # A tag is permanent, so a configuration error must fail here instead. check
+  # validates the file; build --snapshot proves it can actually produce a
+  # binary, which is what a typo in ldflags or an ignore rule breaks.
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --snapshot --clean --single-target
 
   actions:
     runs-on: ubuntu-latest

@@ -64,7 +64,13 @@ fixed.
   backlog or CI fails. Commits and CHANGELOG entries reference the id.
 - **Releases**: every release is a tagged `vX.Y.Z` with a new `CHANGELOG.md`
   section. `minor` for new checks or flags, `patch` for fixes. **Never
-  `git push`**, tags included. No `Co-Authored-By` trailers.
+  `git push`**, tags included. No `Co-Authored-By` trailers. Building,
+  archiving, signing and publishing are **goreleaser's** (`.goreleaser.yaml`),
+  in the same shape as the sibling tools; the Homebrew **cask** goes to
+  `Allan-Nava/homebrew-tap` and needs the `HOMEBREW_TAP_GITHUB_TOKEN` secret.
+  The one part that is not goreleaser's is the release notes: `scripts/release.sh
+  notes` lifts them from `CHANGELOG.md`, because a changelog written for people
+  beats a list of commit subjects.
 
 ## Pattern for adding a check
 

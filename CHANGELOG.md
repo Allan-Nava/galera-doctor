@@ -6,6 +6,52 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.10.0] - 2026-09-04
+
+### Changed
+
+- **goreleaser owns the release, and Homebrew gets a cask** (GD-55) — the same
+  shape as the sibling tools, so one person can read both repositories.
+  `.goreleaser.yaml` builds the six platforms, writes the archives (still
+  carrying the licence, the readme, the changelog and the example config) and a
+  checksum file still called `SHA256SUMS`, so every published download and
+  verify command keeps working. It also adds what the hand-rolled scripts never
+  had: an SBOM per archive, keyless cosign signatures over the checksums and
+  the images, and the `ghcr.io` image as a real multi-arch manifest.
+
+  `brew install --cask Allan-Nava/tap/galera-doctor` — the cask is generated
+  from the checksums of the archives the tag just uploaded and pushed to
+  [Allan-Nava/homebrew-tap](https://github.com/Allan-Nava/homebrew-tap), next
+  to the sibling tools. It carries the postflight hook that strips
+  `com.apple.quarantine`: macOS quarantines an unsigned binary, and a
+  quarantined binary installs cleanly and then refuses to run. A prerelease
+  publishes no cask (`skip_upload: "auto"`), so a `-rc` tag cannot hand every
+  user a release candidate.
+
+  `scripts/brew.sh`, `scripts/brew_test.sh` and the in-repo `Formula/` are
+  **removed** — two things generating a brew install is how they drift — and
+  `scripts/release.sh` keeps exactly one job, the release notes, because a
+  changelog written for people beats a list of commit subjects. Building
+  locally is `goreleaser release --snapshot --clean`.
+
+  `.github/workflows/brew.yml` now installs the published cask on Apple Silicon
+  **and** Intel after every release, weekly, and on demand — and asserts that
+  the tap serves the *latest* release, which is the only check that catches a
+  cask that was never pushed. Two lessons from the sibling tool are asserted by
+  `scripts/release_test.sh` rather than rediscovered: the Intel leg must be
+  `macos-15-intel`, since a retired label queues forever instead of failing,
+  and installing *something* proves nothing on its own.
+
+  CI validates the configuration and builds a snapshot on every push, because a
+  tag is permanent and a configuration error must fail before it.
+
+### Note
+
+- The release now needs a `HOMEBREW_TAP_GITHUB_TOKEN` secret (a PAT with repo
+  scope) to push the cask to the shared tap. Without it the release fails early
+  with a message saying exactly that, rather than deep inside goreleaser with a
+  template error about an empty variable.
+
 ## [0.9.1] - 2026-09-04
 
 ### Added

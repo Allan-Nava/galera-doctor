@@ -1,22 +1,19 @@
 #!/bin/sh
-# release.sh — build the release artefacts for a tag.
+# release.sh — the release notes for a tag.
 #
-# One static binary per platform, one tar.gz each carrying the licence and the
-# readme, and one SHA256SUMS covering all of them. No goreleaser, no release
-# tooling to keep current: this repository has one dependency and its tooling
-# has none.
+# Building, archiving, signing and publishing are goreleaser's
+# (.goreleaser.yaml), the same shape as the sibling tools. This is the one part
+# that stays here: the notes are lifted from CHANGELOG.md and handed to
+# goreleaser with --release-notes, because a changelog written for people beats
+# a list of commit subjects.
 #
-#   scripts/release.sh matrix              the platforms, one os/arch per line
-#   scripts/release.sh build VERSION [DIR] build them all into DIR (default dist/)
-#   scripts/release.sh notes VERSION       the CHANGELOG section for the release page
+#   scripts/release.sh notes VERSION   the CHANGELOG section for the release page
 #
-# VERSION is a tag with or without its v: v0.2.1 and 0.2.1 both produce
-# galera-doctor_0.2.1_linux_amd64.tar.gz, and the binary reports 0.2.1.
+# To build the artefacts locally, without publishing anything:
 #
-# GD_RELEASE_MATRIX overrides the platform list, which is how the test builds
-# for the host only instead of cross-compiling six targets.
+#   goreleaser release --snapshot --clean
 #
-# POSIX sh and the Go toolchain. Tests: scripts/release_test.sh.
+# POSIX sh only. Tests: scripts/release_test.sh.
 
 set -eu
 
@@ -24,81 +21,6 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/galera-doctor-release.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT INT HUP TERM
-
-# The platforms people actually run an audit from: a Linux jump host, an Apple
-# laptop, and the two BSD-adjacent ones that cost nothing to produce.
-default_matrix="linux/amd64
-linux/arm64
-darwin/amd64
-darwin/arm64
-freebsd/amd64
-windows/amd64"
-
-matrix() {
-	if [ -n "${GD_RELEASE_MATRIX:-}" ]; then
-		printf '%s\n' "$GD_RELEASE_MATRIX" | tr ' ' '\n' | grep .
-	else
-		printf '%s\n' "$default_matrix"
-	fi
-}
-
-# sha256 of a file, whichever tool this machine has.
-sha256() {
-	if command -v sha256sum >/dev/null 2>&1; then
-		sha256sum "$1"
-	else
-		shasum -a 256 "$1"
-	fi
-}
-
-build() {
-	version=${1:-}
-	out=${2:-$root/dist}
-	[ -n "$version" ] || {
-		echo "usage: scripts/release.sh build VERSION [DIR]" >&2
-		exit 2
-	}
-	# A tag is v0.2.1; an artefact name is 0.2.1.
-	bare=${version#v}
-
-	rm -rf "$out"
-	mkdir -p "$out"
-	stage="$out/.stage"
-
-	matrix | while IFS=/ read -r os arch; do
-		[ -n "$os" ] && [ -n "$arch" ] || continue
-		bin=galera-doctor
-		[ "$os" = windows ] && bin=galera-doctor.exe
-		rm -rf "$stage"
-		mkdir -p "$stage"
-
-		# Same flags as the Dockerfile: static, trimmed, version stamped.
-		CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
-			-trimpath -ldflags "-s -w -X main.version=$bare" \
-			-o "$stage/$bin" "$root/cmd/galera-doctor"
-
-		# A binary in a download folder is separated from its repository
-		# forever, so the licence and the readme travel with it.
-		cp "$root/LICENSE" "$root/README.md" "$stage/"
-
-		archive="galera-doctor_${bare}_${os}_${arch}.tar.gz"
-		tar czf "$out/$archive" -C "$stage" "$bin" LICENSE README.md
-		echo "  $archive"
-	done
-	rm -rf "$stage"
-
-	# One checksum file covering every archive, written from the bytes that are
-	# actually on disk rather than from what the loop believed it wrote.
-	(
-		cd "$out"
-		: >SHA256SUMS
-		for f in *.tar.gz; do
-			sha256 "$f" >>SHA256SUMS
-		done
-	)
-	echo "  SHA256SUMS"
-	echo "built $(matrix | grep -c .) platform(s) for $bare in $out"
-}
 
 # notes prints the CHANGELOG section for one version: what GitHub shows on the
 # release page. Lifted rather than retyped, and a version with no section is a
@@ -130,18 +52,13 @@ notes() {
 		sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
 }
 
-case "${1:-matrix}" in
-matrix) matrix ;;
+case "${1:-}" in
 notes)
 	shift
 	notes "$@"
 	;;
-build)
-	shift
-	build "$@"
-	;;
 *)
-	echo "usage: scripts/release.sh [matrix|build VERSION [DIR]|notes VERSION]" >&2
+	echo "usage: scripts/release.sh notes VERSION" >&2
 	exit 2
 	;;
 esac

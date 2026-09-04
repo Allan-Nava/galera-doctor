@@ -189,9 +189,8 @@ a claim.
 ## Install
 
 ```sh
-# Homebrew — this repository is the tap
-brew tap Allan-Nava/galera-doctor https://github.com/Allan-Nava/galera-doctor
-brew install galera-doctor
+# Homebrew — the cask lives in the shared tap
+brew install --cask Allan-Nava/tap/galera-doctor
 
 # a container that holds nothing but the binary
 docker run --rm ghcr.io/allan-nava/galera-doctor:latest checks
@@ -257,8 +256,8 @@ stale generated file fails the build instead of rotting:
 
 ```sh
 scripts/backlog.sh roadmap   # regenerate ROADMAP.md from BACKLOG.md
-scripts/release.sh build 0.0.0-dev dist   # the release artefacts, locally
-scripts/brew.sh render v0.0.0-dev dist/SHA256SUMS  # the formula they imply
+goreleaser release --snapshot --clean     # the release artefacts, locally
+scripts/release.sh notes v0.9.0           # the notes a release page would get
 scripts/links.sh             # every local link in the docs and the site resolves
 scripts/site.sh serve        # the landing page in site/, on localhost:8000
 scripts/docs.sh build        # render docs/*.md into site/docs/

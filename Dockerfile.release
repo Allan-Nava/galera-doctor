@@ -1,0 +1,10 @@
+# The released image: goreleaser has already built the static binary for this
+# platform, so there is nothing to compile here.
+#
+# distroless static rather than scratch — no shell and non-root, same as before,
+# plus the CA bundle a TLS DSN needs. Dockerfile (not this one) is still the
+# from-source build a human runs with `docker build .`.
+FROM gcr.io/distroless/static:nonroot
+COPY galera-doctor /usr/bin/galera-doctor
+ENTRYPOINT ["/usr/bin/galera-doctor"]
+CMD ["help"]

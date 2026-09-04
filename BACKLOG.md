@@ -134,6 +134,14 @@ touching this file, or CI will fail.
   that installs from the tap the way the docs say to, since a release asset can
   be deleted long after the run that made it went green.
   <!-- gd: prio=high size=S labels=release,tests ver=0.9.1 -->
+- [x] **GD-55 — goreleaser and a cask, like the sibling tools**: the
+  hand-rolled `scripts/release.sh build` and `scripts/brew.sh` are replaced by
+  `.goreleaser.yaml` — archives, `SHA256SUMS`, SBOMs, keyless cosign
+  signatures, the multi-arch `ghcr.io` image, and a Homebrew **cask** pushed to
+  `Allan-Nava/homebrew-tap` with the quarantine hook every unsigned binary
+  needs. One release shape across the tools, and `brew install --cask
+  Allan-Nava/tap/galera-doctor` alongside its siblings.
+  <!-- gd: prio=high size=M labels=release,delivery ver=0.10.0 -->
 - [x] **GD-21 — Docs site**: `docs/` published with the same POSIX-sh generator
   the sibling tools use, with a dead-link gate in CI.
   <!-- gd: prio=med size=M labels=docs ver=0.9.0 -->

@@ -1,48 +1,123 @@
-name: Homebrew tap
+name: Brew test
 
-# The release verifies the formula it publishes. This verifies the *published
-# tap*, which has a life after that run: a release asset can be deleted, a
-# repository can be renamed, and the first person to find out should not be
-# somebody typing `brew install`.
+# Verifies that `brew install --cask Allan-Nava/tap/galera-doctor` actually
+# works end to end on macOS — after every Release (so the freshly-pushed cask
+# is exercised), on demand, and weekly, which catches a tap that rots: a
+# deleted release asset, an expired token whose failure nobody noticed.
 #
-# It installs the way the docs say to — brew tap by URL, then brew install by
-# name — so what is tested is the sentence a reader will actually run.
+# Casks are macOS-only, so this runs on Apple Silicon and Intel to cover both
+# branches of the generated cask. Linux and everything else install from the
+# release archive or the container image.
+#
+# The Intel leg is `macos-15-intel`, NOT `macos-13`: that image was retired,
+# and a job asking for a label with no runners behind it does not fail — it
+# sits queued forever, so the workflow never concludes and in practice verifies
+# nothing. A green-looking tap that nobody actually installed is worse than no
+# check. (Learned in checkfleet, CF-159; asserted here by
+# scripts/release_test.sh.)
 on:
-  schedule:
-    # The 4th of each month, early. Nothing here is urgent; it exists so a
-    # broken tap is found in weeks rather than never.
-    - cron: "17 6 4 * *"
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to expect, without the leading v; empty = whatever releases/latest says"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
 permissions:
   contents: read
 
-concurrency:
-  group: brew-tap
-  cancel-in-progress: false
-
 jobs:
-  install-from-the-tap:
-    runs-on: macos-latest
+  brew-install:
+    # For the Release trigger: only when it succeeded, and never for a
+    # prerelease — skip_upload "auto" publishes no cask for a v*-rc.* tag, so a
+    # run here would install the previous stable one and report success for a
+    # release it never saw.
+    if: >-
+      ${{ github.event_name != 'workflow_run' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           !contains(github.event.workflow_run.head_branch, '-')) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15-intel] # arm64, intel
+    runs-on: ${{ matrix.os }}
+    # A guard, not an optimisation: the install takes a few minutes, so
+    # anything near this is a hang — an interactive prompt, a stalled download
+    # — and the run should say so instead of looking busy.
+    timeout-minutes: 20
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      # Homebrew 6+ asks to "trust" a third-party tap interactively; a headless
+      # install would hang on that prompt.
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
     steps:
-      - name: brew tap, the way the docs say to
-        run: |
-          brew tap Allan-Nava/galera-doctor https://github.com/Allan-Nava/galera-doctor
-          brew install galera-doctor
+      - name: Install from the tap
+        run: brew install --cask Allan-Nava/tap/galera-doctor
 
-      - name: The tap installs something that runs
+      - name: It runs and reports a real version
         run: |
-          galera-doctor version
+          set -euo pipefail
+          which galera-doctor
+          out="$(galera-doctor version)"
+          echo "$out"
+          # Not the local "dev" string: a released cask carries a real version.
+          echo "$out" | grep -Eq '^galera-doctor [0-9]+\.[0-9]+\.[0-9]+' \
+            || { echo "::error::unexpected version output: $out"; exit 1; }
+
+      # The check that actually matters. Installing *something* only proves brew
+      # works: when the cask on the tap is stale — the classic case is a token
+      # whose expiry made goreleaser's last step fail — the old version installs
+      # cleanly and this job goes green while `brew install` hands users a
+      # release from months ago. Comparing against releases/latest is the only
+      # signal that catches it, and because it does not depend on the trigger,
+      # the Monday run catches drift that appeared with no release at all.
+      - name: The tap serves the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WANT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$WANT" ]; then
+            # No tag given resolves /releases/latest, which excludes drafts and
+            # prereleases — exactly what the cask is supposed to track.
+            WANT="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+            WANT="${WANT#v}"
+          fi
+          GOT="$(galera-doctor version | awk '{print $2}')"
+          echo "tap serves $GOT, latest release is $WANT"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::the tap is stale: installed $GOT but the latest release is $WANT — the cask was not pushed (check HOMEBREW_TAP_GITHUB_TOKEN upstream)"
+            exit 1
+          fi
+
+      - name: Gatekeeper quarantine attribute is stripped
+        run: |
+          set -euo pipefail
+          bin="$(readlink -f "$(which galera-doctor)")"
+          if xattr -l "$bin" 2>/dev/null | grep -qi com.apple.quarantine; then
+            echo "::error::$bin still has com.apple.quarantine — the postflight hook failed, and macOS will refuse to run it"
+            exit 1
+          fi
+          echo "no quarantine attribute"
+
+      - name: Smoke — it audits, and refuses what it must refuse
+        run: |
+          set -euo pipefail
           galera-doctor checks | head -3
-          # A binary that cannot be pointed at anything still exits 2 on a
-          # usage error rather than crashing, which is the cheapest proof that
-          # this is the real thing and not a stub.
+          # Pointed at nothing, the audit is a usage error and exits 2. That is
+          # the cheapest proof this is the real binary and not a stub that
+          # prints a version.
           if galera-doctor audit >/dev/null 2>&1; then
             echo "::error::an audit with no node given should be a usage error"
             exit 1
           fi
 
-      - name: The formula in the tap is the one the repository generated
-        run: |
-          brew info --json=v2 --formula galera-doctor |
-            python3 -c 'import json,sys; d=json.load(sys.stdin)["formulae"][0]; print(d["name"], d["versions"]["stable"])'
+      - name: Uninstall
+        if: always()
+        run: brew uninstall --cask galera-doctor || true
