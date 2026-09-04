@@ -77,7 +77,7 @@ touching this file, or CI will fail.
   `GD_TEST_DSN`, because an information_schema join that is subtly wrong looks
   perfect from a fixture. <!-- gd: prio=high size=S labels=tests ver=0.1.0 -->
 
-## M2 — Deeper into the cluster <!-- ms: target=v0.2.0 phase=now -->
+## M2 — Deeper into the cluster <!-- ms: target=v0.2.0 phase=later -->
 
 - [x] **GD-13 — Application schema drift**: the same fingerprint comparison for
   the application schemas. Galera *does* replicate that DDL, so a difference
@@ -87,11 +87,18 @@ touching this file, or CI will fail.
 - [ ] **GD-14 — Backup freshness**: a dump on disk is not a backup that left the
   building. Check the age of the local dump *and* whether it reached its
   off-site destination, because the first without the second is the failure
-  everybody discovers at the worst moment.
-  <!-- gd: prio=high size=M labels=check -->
+  everybody discovers at the worst moment. **Parked**: this needs the
+  filesystem and the off-site destination, and this tool only speaks read-only
+  SQL to nodes — as written it is a generic backup check and belongs in
+  [checkfleet](https://github.com/Allan-Nava/checkfleet). It earns its place
+  here only in a form that reads backup metadata out of a table named in the
+  config. <!-- gd: prio=high size=M labels=check -->
 - [ ] **GD-15 — SST/IST history**: read the recent state transfers from the
   error log or the status counters, so a cluster that quietly full-syncs a node
-  every week is visible. <!-- gd: prio=med size=L labels=check -->
+  every week is visible. **Parked**: MariaDB exposes no state-transfer
+  counters, so this needs the error log — outside the SQL channel. GD-52 (a
+  node that restarted between runs) is the part of it that *is* reachable.
+  <!-- gd: prio=med size=L labels=check -->
 - [x] **GD-16 — Node clock skew**: compare each node's clock with the auditing
   host. Certification and log correlation both suffer, and it is one query.
   <!-- gd: prio=med size=S labels=check ver=0.5.0 -->
@@ -102,11 +109,13 @@ touching this file, or CI will fail.
   transitions, for the window in which a cluster is being repaired.
   <!-- gd: prio=low size=M labels=cli -->
 
-## M3 — Fit the toolchain <!-- ms: target=v0.3.0 phase=next -->
+## M3 — Fit the toolchain <!-- ms: target=v0.3.0 phase=later -->
 
 - [ ] **GD-19 — checkfleet module**: emit the same findings under a `galera`
   module in [checkfleet](https://github.com/Allan-Nava/checkfleet), so a fleet
-  already described there gains the check without a second inventory.
+  already described there gains the check without a second inventory. **Parked
+  here**: the code lives in that repository, and what this one owes it is the
+  stable `--findings` array it already emits.
   <!-- gd: prio=high size=M labels=integration -->
 - [x] **GD-20 — Release pipeline**: tag-driven archives for six platforms with
   `SHA256SUMS`, an attestation, the `ghcr.io` image and notes lifted from the
@@ -188,7 +197,7 @@ which is why these belong together rather than one per release.
   green and the rows exist on one node. Sibling of `schema/no-pk` and a
   different diagnosis. <!-- gd: prio=high size=M labels=check ver=0.2.0 -->
 
-## M5 — The cluster you cannot see from one node <!-- ms: target=v0.3.0 phase=next -->
+## M5 — The cluster you cannot see from one node <!-- ms: target=v0.3.0 phase=shipped -->
 
 M4 shipped the states that cost you at the next restart. This one continues the
 same line into the settings that are *per node* while everybody talks about
@@ -277,3 +286,51 @@ told about.
   not have, a node that could not be read. A cron job needs one line to know
   whether "no findings" meant "nothing is wrong".
   <!-- gd: prio=med size=S labels=output ver=0.6.0 -->
+
+## M7 — Every write path, drawn or not <!-- ms: target=v1.0.0 phase=next -->
+
+Everything shipped so far treats the cluster as the only thing writing to
+itself. Real deployments are rarely that tidy: a node is also an async replica,
+another one feeds a reporting replica downstream, a trigger runs on one node
+and not on its peers, and somebody believes writes only go to one member. None
+of it appears in a cluster diagram and none of it appears in `wsrep_*` — the
+cluster cannot see a write path it is not part of.
+
+- [ ] **GD-47 — Async replication attached to the cluster**: `SHOW REPLICA
+  STATUS` per node, and whether any node is a source for something outside.
+  A member that is also an async replica is a second write path into the
+  cluster; a member that feeds a downstream replica is a dependency nobody
+  else in the cluster knows about, and the next SST rebuilds its binlogs out
+  from under it. <!-- gd: prio=high size=M labels=collect,check -->
+- [ ] **GD-48 — GTID domains that do not agree**: `gtid_domain_id`,
+  `server_id` and `gtid_strict_mode` across nodes. When anything replicates out
+  of a Galera cluster, the nodes have to agree about the domain or a failover
+  silently rewrites history for every downstream replica — and nothing in the
+  cluster is affected, which is why nothing reports it.
+  <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-50 — Triggers that run on one node only**:
+  `wsrep_slave_run_triggers` per node. A trigger that fires on the writer and
+  not on the appliers writes rows on one node and not the others — divergence
+  produced by design, certified by nothing, invisible to every counter.
+  <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-49 — Who is actually writing**: `wsrep_replicated` per node over the
+  interval (needs `--state`). "We only write to one node" is a belief, and the
+  cluster has the numbers to confirm or refute it — a second writer nobody
+  meant to have is the cause behind half the certification failures this tool
+  already reports. <!-- gd: prio=med size=M labels=check -->
+- [ ] **GD-51 — The binary log, per node**: `log_bin`, `binlog_format` and
+  `log_slave_updates` compared. Galera does not need the binlog and everything
+  around a cluster does: a node with it off is a node no backup and no
+  downstream replica can be taken from, and finding that out during a failover
+  is finding it out too late. <!-- gd: prio=med size=S labels=check -->
+- [ ] **GD-52 — A node that restarted between runs**: `wsrep_gcomm_uuid`
+  compared with the previous run (needs `--state`). A restart resets every
+  counter, which is exactly why the rate checks fall back to *no baseline* —
+  and this is the check that says the restart happened rather than leaving it
+  as an unexplained gap. <!-- gd: prio=med size=S labels=check -->
+- [ ] **GD-53 — The membership as the cluster reports it**:
+  `information_schema.WSREP_MEMBERSHIP` where the `wsrep_info` plugin is
+  installed, compared with what each node claims about itself. Two independent
+  views of the same membership, and a node that believes it is a member while
+  the group has not listed it is a state no single node can report.
+  <!-- gd: prio=low size=M labels=collect,check -->

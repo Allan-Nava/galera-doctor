@@ -6,28 +6,31 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**46 items · 41 shipped · 5 open · 6 milestones.**
+**53 items · 41 shipped · 12 open · 7 milestones.**
 
 ## At a glance
 
 | Milestone | Target | Phase | Progress | Open | Shipped |
 |---|---|---|---|---|---|
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
-| **M2** — Deeper into the cluster | `v0.2.0` | **now** | `#####.....` 50% | 3 | 3 |
-| **M3** — Fit the toolchain | `v0.3.0` | next | `#######...` 71% | 2 | 5 |
+| **M2** — Deeper into the cluster | `v0.2.0` | later | `#####.....` 50% | 3 | 3 |
+| **M3** — Fit the toolchain | `v0.3.0` | later | `#######...` 71% | 2 | 5 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
-| **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `##########` 100% | 0 | 7 |
+| **M5** — The cluster you cannot see from one node | `v0.3.0` | shipped | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
+| **M7** — Every write path, drawn or not | `v1.0.0` | next | `..........` 0% | 7 | 0 |
 
 ## Next up
 
 The open items with the highest priority in the milestones that are in flight.
 
-- **GD-14** — Backup freshness · `high` · size `M` · check (M2, target `v0.2.0`)
-- **GD-19** — checkfleet module · `high` · size `M` · integration (M3, target `v0.3.0`)
-- **GD-15** — SST/IST history · `med` · size `L` · check (M2, target `v0.2.0`)
-- **GD-18** — Watch mode · `low` · size `M` · cli (M2, target `v0.2.0`)
-- **GD-22** — Percona XtraDB Cluster and MySQL Group Replication · `low` · size `XL` · check (M3, target `v0.3.0`)
+- **GD-47** — Async replication attached to the cluster · `high` · size `M` · collect,check (M7, target `v1.0.0`)
+- **GD-48** — GTID domains that do not agree · `high` · size `S` · check (M7, target `v1.0.0`)
+- **GD-50** — Triggers that run on one node only · `high` · size `S` · check (M7, target `v1.0.0`)
+- **GD-49** — Who is actually writing · `med` · size `M` · check (M7, target `v1.0.0`)
+- **GD-51** — The binary log, per node · `med` · size `S` · check (M7, target `v1.0.0`)
+- **GD-52** — A node that restarted between runs · `med` · size `S` · check (M7, target `v1.0.0`)
+- **GD-53** — The membership as the cluster reports it · `low` · size `M` · collect,check (M7, target `v1.0.0`)
 
 ## Milestones
 
@@ -52,7 +55,7 @@ Target `v0.1.0` · shipped · 0 open · 12 shipped · `##########` 100%
 
 ### M2 — Deeper into the cluster
 
-Target `v0.2.0` · **now** · 3 open · 3 shipped · `#####.....` 50%
+Target `v0.2.0` · later · 3 open · 3 shipped · `#####.....` 50%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
@@ -65,7 +68,7 @@ Target `v0.2.0` · **now** · 3 open · 3 shipped · `#####.....` 50%
 
 ### M3 — Fit the toolchain
 
-Target `v0.3.0` · next · 2 open · 5 shipped · `#######...` 71%
+Target `v0.3.0` · later · 2 open · 5 shipped · `#######...` 71%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
@@ -94,7 +97,7 @@ Target `v0.2.0` · shipped · 0 open · 8 shipped · `##########` 100%
 
 ### M5 — The cluster you cannot see from one node
 
-Target `v0.3.0` · next · 0 open · 7 shipped · `##########` 100%
+Target `v0.3.0` · shipped · 0 open · 7 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
@@ -119,14 +122,28 @@ Target `v0.6.0` · shipped · 0 open · 6 shipped · `##########` 100%
 | **GD-41** — What a rejoin will actually copy | med | M | check | shipped `0.6.0` |
 | **GD-43** — What this run could not audit | med | S | output | shipped `0.6.0` |
 
+### M7 — Every write path, drawn or not
+
+Target `v1.0.0` · next · 7 open · 0 shipped · `..........` 0%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-47** — Async replication attached to the cluster | high | M | collect,check | open |
+| **GD-48** — GTID domains that do not agree | high | S | check | open |
+| **GD-50** — Triggers that run on one node only | high | S | check | open |
+| **GD-49** — Who is actually writing | med | M | check | open |
+| **GD-51** — The binary log, per node | med | S | check | open |
+| **GD-52** — A node that restarted between runs | med | S | check | open |
+| **GD-53** — The membership as the cluster reports it | low | M | collect,check | open |
+
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 27 | 3 |
+| `check` | 34 | 10 |
+| `collect` | 4 | 2 |
 | `cli` | 2 | 1 |
 | `integration` | 1 | 1 |
-| `collect` | 2 | 0 |
 | `delivery` | 1 | 0 |
 | `docs` | 4 | 0 |
 | `output` | 3 | 0 |
