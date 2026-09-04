@@ -21,7 +21,7 @@ repo_url="https://github.com/Allan-Nava/galera-doctor/blob/main/"
 if [ "$#" -eq 0 ]; then
 	# Tracked files only: a scratch note in the working tree is not the docs.
 	# shellcheck disable=SC2046
-	set -- $(git ls-files '*.md' 'site/*.html')
+	set -- $(git ls-files '*.md' '*.html')
 fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/galera-doctor-links.XXXXXX")

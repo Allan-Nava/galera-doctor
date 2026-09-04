@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>galera-doctor — galera-doctor</title>
+<meta name="description" content="galera-doctor — galera-doctor, a read-only audit of a MariaDB/MySQL Galera cluster.">
+<link rel="canonical" href="https://allan-nava.github.io/galera-doctor/docs/index.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="../mark.svg" type="image/svg+xml">
+<meta property="og:title" content="galera-doctor — galera-doctor">
+<meta property="og:description" content="galera-doctor: the Galera states no wsrep_* counter can show you.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://allan-nava.github.io/galera-doctor/docs/index.html">
+<meta property="og:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<nav>
+  <a class="home" href="../"><img src="../mark.svg" alt="" width="26" height="26"> galera-doctor</a>
+  <a href="https://github.com/Allan-Nava/galera-doctor">GitHub</a>
+</nav>
+<main>
+<h1>galera-doctor</h1>
+<p>
+<strong>A read-only audit of a Galera cluster that reports the states its own metrics cannot show you.</strong>
+</p>
+<ul>
+<li><a href="install.html">Install</a></li>
+<li><a href="usage.html">Usage</a> — flags, config, output, exit status</li>
+<li><a href="checks.html">Checks</a> — every check, what it grades and why</li>
+<li><a href="rates.html">Rates, not totals</a> — the state file, and why a counter is never a verdict</li>
+<li><a href="safety.html">Permissions and safety</a> — the grants it needs, the writes it cannot do</li>
+<li><a href="https://github.com/Allan-Nava/galera-doctor/blob/main/INTENT.md">Intent</a> — why it exists, and what it will never become</li>
+</ul>
+<h2 id="the-one-minute-version">The one-minute version</h2>
+<pre><code>
+$ galera-doctor audit --config clusters.json --state /var/lib/galera-doctor/compress.json
+BAD   compress  3 node(s)
+  BAD   systables/drift   mysql.column_stats  definition differs across nodes: aaaaaaaaaaaa… (ov-03, sg-01) vs cccccccccccc… (cl-02)
+        ↳ Galera does not replicate this: fix it per node — no wsrep_* metric will ever show it
+  WARN  flow/paused       sg-01               flow-controlled 2.10% of the last 10m0s
+  OK    cluster/size      compress            3 member(s), expected 3
+</code></pre>
+<p>
+Three nodes, one cluster, every replication counter green — and one of them has been holding a different definition of a system table since somebody ran <code>mysql_upgrade</code> on two of the three.
+</p>
+<hr>
+<p>
+These pages are published at <a href="https://allan-nava.github.io/galera-doctor/">allan-nava.github.io/galera-doctor</a>, rendered from this directory by <code>scripts/docs.sh</code> — the Markdown here is the only source, and CI fails when a published page has fallen behind it.
+</p>
+</main>
+<footer>
+  <a href="../">galera-doctor</a> ·
+  <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/index.md">this page on GitHub</a> ·
+  MIT
+</footer>
+</body>
+</html>

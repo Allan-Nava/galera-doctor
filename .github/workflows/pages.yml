@@ -33,6 +33,10 @@ jobs:
       - name: Sync the logo into the site
         run: ./scripts/site.sh sync
 
+      # Generated from docs/*.md; CI already fails when they have drifted.
+      - name: Render the reference pages
+        run: ./scripts/docs.sh build
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

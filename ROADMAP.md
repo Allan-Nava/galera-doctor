@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**46 items · 40 shipped · 6 open · 6 milestones.**
+**46 items · 41 shipped · 5 open · 6 milestones.**
 
 ## At a glance
 
@@ -14,7 +14,7 @@
 |---|---|---|---|---|---|
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
 | **M2** — Deeper into the cluster | `v0.2.0` | **now** | `#####.....` 50% | 3 | 3 |
-| **M3** — Fit the toolchain | `v0.3.0` | next | `######....` 57% | 3 | 4 |
+| **M3** — Fit the toolchain | `v0.3.0` | next | `#######...` 71% | 2 | 5 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
@@ -26,7 +26,6 @@ The open items with the highest priority in the milestones that are in flight.
 - **GD-14** — Backup freshness · `high` · size `M` · check (M2, target `v0.2.0`)
 - **GD-19** — checkfleet module · `high` · size `M` · integration (M3, target `v0.3.0`)
 - **GD-15** — SST/IST history · `med` · size `L` · check (M2, target `v0.2.0`)
-- **GD-21** — Docs site · `med` · size `M` · docs (M3, target `v0.3.0`)
 - **GD-18** — Watch mode · `low` · size `M` · cli (M2, target `v0.2.0`)
 - **GD-22** — Percona XtraDB Cluster and MySQL Group Replication · `low` · size `XL` · check (M3, target `v0.3.0`)
 
@@ -66,14 +65,14 @@ Target `v0.2.0` · **now** · 3 open · 3 shipped · `#####.....` 50%
 
 ### M3 — Fit the toolchain
 
-Target `v0.3.0` · next · 3 open · 4 shipped · `######....` 57%
+Target `v0.3.0` · next · 2 open · 5 shipped · `#######...` 71%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
 | **GD-19** — checkfleet module | high | M | integration | open |
-| **GD-21** — Docs site | med | M | docs | open |
 | **GD-22** — Percona XtraDB Cluster and MySQL Group Replication | low | XL | check | open |
 | **GD-20** — Release pipeline | high | M | release | shipped `0.3.0` |
+| **GD-21** — Docs site | med | M | docs | shipped `0.9.0` |
 | **GD-23** — Identity and landing page | med | S | docs,project | shipped `0.1.1` |
 | **GD-24** — The project's own metadata is generated too | med | S | project,docs | shipped `0.1.1` |
 | **GD-37** — Homebrew, from the release's own checksums | med | S | delivery | shipped `0.3.0` |
@@ -126,10 +125,10 @@ Target `v0.6.0` · shipped · 0 open · 6 shipped · `##########` 100%
 |---|---|---|
 | `check` | 27 | 3 |
 | `cli` | 2 | 1 |
-| `docs` | 4 | 1 |
 | `integration` | 1 | 1 |
 | `collect` | 2 | 0 |
 | `delivery` | 1 | 0 |
+| `docs` | 4 | 0 |
 | `output` | 3 | 0 |
 | `project` | 3 | 0 |
 | `proxysql` | 2 | 0 |

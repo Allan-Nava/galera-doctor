@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checks — galera-doctor</title>
+<meta name="description" content="Checks — galera-doctor, a read-only audit of a MariaDB/MySQL Galera cluster.">
+<link rel="canonical" href="https://allan-nava.github.io/galera-doctor/docs/checks.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="../mark.svg" type="image/svg+xml">
+<meta property="og:title" content="Checks — galera-doctor">
+<meta property="og:description" content="galera-doctor: the Galera states no wsrep_* counter can show you.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://allan-nava.github.io/galera-doctor/docs/checks.html">
+<meta property="og:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<nav>
+  <a class="home" href="../"><img src="../mark.svg" alt="" width="26" height="26"> galera-doctor</a>
+  <a href="https://github.com/Allan-Nava/galera-doctor">GitHub</a>
+</nav>
+<main>
+<h1>Checks</h1>
+<p>
+Each finding carries <code>check</code>, <code>target</code>, <code>status</code>, <code>message</code>, a <code>value</code>/<code>unit</code> where there is a number, and a <code>hint</code> that says what it means operationally. Worst first, always.
+</p>
+<p>
+<code>ERROR</code> sorts above <code>BAD</code>: a node that could not be read invalidates every cluster-wide statement made without it, and that has to be seen first.
+</p>
+<h2 id="the-cluster-as-a-whole">The cluster as a whole</h2>
+<div class="scroll"><table><thead><tr>
+<th>Check</th>
+<th>Grades</th>
+</tr></thead><tbody>
+<tr>
+<td><code>node/read</code></td>
+<td>the node answered at all. ERROR — every cluster finding below is conditional on it</td>
+</tr>
+<tr>
+<td><code>node/not-galera</code></td>
+<td><code>wsrep_provider</code> unset: a standalone server, excluded from every comparison</td>
+</tr>
+<tr>
+<td><code>cluster/uuid</code></td>
+<td>nodes reporting different state UUIDs — one name, two clusters</td>
+</tr>
+<tr>
+<td><code>cluster/conf-id</code></td>
+<td>nodes disagreeing about the membership generation (usually a change caught mid-flight)</td>
+</tr>
+<tr>
+<td><code>cluster/primary</code></td>
+<td>a node outside the Primary component: it refuses writes and serves stale reads</td>
+</tr>
+<tr>
+<td><code>cluster/size</code></td>
+<td>membership size against <code>--expect-nodes</code>; nodes <em>disagreeing</em> about it beats the size itself</td>
+</tr>
+<tr>
+<td><code>cluster/versions</code>, <code>cluster/provider-version</code></td>
+<td>mixed builds — expected during a rolling upgrade, a liability afterwards</td>
+</tr>
+</tbody></table></div>
+<h2 id="per-node">Per node</h2>
+<div class="scroll"><table><thead><tr>
+<th>Check</th>
+<th>Grades</th>
+</tr></thead><tbody>
+<tr>
+<td><code>node/ready</code></td>
+<td><code>wsrep_ready</code> OFF: queries touching replicated tables are refused</td>
+</tr>
+<tr>
+<td><code>node/connected</code></td>
+<td><code>wsrep_connected</code> OFF: not in the group communication at all</td>
+</tr>
+<tr>
+<td><code>node/wsrep-on</code></td>
+<td><code>wsrep_on</code> OFF: writes here are not replicated and will conflict later</td>
+</tr>
+<tr>
+<td><code>node/state</code></td>
+<td>the local state comment. Synced is OK, Donor/Desynced and Joined are warnings, anything else is BAD</td>
+</tr>
+<tr>
+<td><code>node/desync</code></td>
+<td><code>wsrep_desync</code> left ON after a backup or a schema change</td>
+</tr>
+<tr>
+<td><code>node/read-only</code></td>
+<td><code>read_only</code> ON — a failover that never finished, unless it is deliberate</td>
+</tr>
+<tr>
+<td><code>queue/recv</code>, <code>queue/send</code></td>
+<td>instantaneous queue depths: the node about to flow-control</td>
+</tr>
+</tbody></table></div>
+<h2 id="the-ones-no-metric-shows">The ones no metric shows</h2>
+<h3 id="systables-drift"><code>systables/drift</code></h3>
+<p>
+The column definitions of every table in the <code>mysql</code> schema, fingerprinted per node and compared.
+</p>
+<p>
+Galera replicates the application's DDL. It does not replicate the maintenance that happens to the server's own tables, so two nodes can hold different definitions of <code>mysql.column_stats</code> — or of whatever <code>mysql_upgrade</code> touched on one node and not the others — indefinitely, while every <code>wsrep_*</code> counter reads perfectly healthy. The symptom arrives much later as a query plan that differs per node, or one node's error log filling up.
+</p>
+<p>
+A node without <code>SELECT</code> on <code>information_schema</code> is reported as <strong>not audited</strong> rather than silently left out of the comparison.
+</p>
+<h3 id="schema-drift"><code>schema/drift</code></h3>
+<p>
+The same fingerprint comparison over the <strong>application</strong> base tables, keyed <code>schema.table</code>.
+</p>
+<p>
+Galera <em>does</em> replicate this DDL, and that is what makes it a different diagnosis rather than the same check pointed at another schema: a difference here is a schema change that did not finish — a failed <code>ALTER</code>, one applied on a single node by hand, or one that landed while a node was desynced. The counters stay green because replication is not broken; it carried what it was given.
+</p>
+<p>
+The fix is per node too, but it is <em>re-apply the change</em>, not <code>mysql_upgrade</code>.
+</p>
+<p>
+A node that missed a whole schema change drifts on every table at once, so past five tables the finding becomes one line with the count — four hundred findings would bury the rest of the report. Views are excluded: their columns are derived from tables that are already being compared. A node without <code>SELECT</code> on <code>information_schema</code> is <strong>not audited</strong> rather than dropped from the comparison, and a cluster with no application tables at all is quiet — "there are none" and "they could not be read" are different findings.
+</p>
+<p>
+<code>--no-schema</code> skips this read and the primary key one with it: on an instance with tens of thousands of tables they are the only part of the audit that costs more than microseconds.
+</p>
+<h3 id="schema-no-pk"><code>schema/no-pk</code></h3>
+<p>
+Application tables without a primary key, as a union across nodes. Galera's row-based certification applies these with a full-row scan on every node, and <code>DELETE</code>s can apply in a different order — the documentation calls it unsupported.
+</p>
+<h3 id="schema-engine"><code>schema/engine</code></h3>
+<p>
+Application base tables on an engine Galera does not replicate — MyISAM, Aria, anything that is not InnoDB.
+</p>
+<p>
+The write succeeds. Nothing certifies it, nothing replicates it, and no counter records that it went nowhere: the rows exist on the node that took them. This is the sibling of <code>schema/no-pk</code> and a worse diagnosis — that one is a table Galera certifies badly, this one is a table it does not certify at all.
+</p>
+<p>
+MariaDB can be told to replicate MyISAM and Aria (<code>wsrep_mode</code>, or the older <code>wsrep_replicate_myisam</code>). That is experimental, and it is <strong>per node</strong>: when the nodes disagree about it the finding is <code>BAD</code> rather than <code>WARN</code>, because then the same write lands on some of them and not others.
+</p>
+<h2 id="what-the-next-restart-costs">What the next restart costs</h2>
+<p>
+Everything in this section is free today. It is a state the cluster has already decided, and the bill arrives at the next restart, failover or partition — which is why no <code>wsrep_*</code> counter has an opinion about any of it.
+</p>
+<h3 id="sst-method-sst-donor-sst-auth"><code>sst/method</code>, <code>sst/donor</code>, <code>sst/auth</code></h3>
+<ul>
+<li><strong><code>sst/method</code></strong> — the nodes disagreeing about <code>wsrep_sst_method</code>. The joiner asks and the donor serves, so a donor without the joiner's method installed cannot answer.</li>
+<li><strong><code>sst/donor</code></strong> — <code>wsrep_sst_donor</code> naming a server this cluster does not have, under any spelling it answers to. Whether that is fatal is decided by a trailing comma: <code>node1,</code> falls back to any donor (<code>WARN</code>), <code>node1</code> is the only donor allowed and the node <strong>refuses to start</strong> without it (<code>BAD</code>).</li>
+<li><strong><code>sst/auth</code></strong> — an empty <code>wsrep_sst_auth</code> with a method that logs in to the donor. The credentials can legitimately live in the <code>[sst]</code> section of the config where the server cannot see them, so this is a <code>WARN</code> that says so rather than a verdict.</li>
+</ul>
+<h3 id="quorum-ignore-sb-quorum-bootstrap-quorum-weight"><code>quorum/ignore-sb</code>, <code>quorum/bootstrap</code>, <code>quorum/weight</code></h3>
+<ul>
+<li><strong><code>quorum/ignore-sb</code></strong> — <code>pc.ignore_sb</code> on. The node keeps accepting writes in a non-Primary component, so the next partition leaves both sides writable and diverging. Usually left behind after a cluster was recovered by hand.</li>
+<li><strong><code>quorum/bootstrap</code></strong> — <code>pc.bootstrap</code> still set. A one-shot trigger left in the configuration makes the node form its own Primary component next time it starts alone.</li>
+<li><strong><code>quorum/weight</code></strong> — <code>pc.weight</code>, reported as arithmetic rather than as an opinion: the sum, and whether one node alone holds a majority. Weight 0 is <code>BAD</code> — that node never counts towards quorum, so the cluster has one fewer vote than it has nodes.</li>
+</ul>
+<h3 id="gcache-recover"><code>gcache/recover</code></h3>
+<p>
+<code>gcache.recover</code> off. <a href="#gcachewindow"><code>gcache/window</code></a> measures how much time the write-set cache buys before a restarting node needs a full state transfer — and with <code>gcache.recover</code> off, a clean restart discards that cache along with the process. The window is a buffer the setting throws away: even a two-minute maintenance restart then costs a full SST, which takes a donor out of service with it.
+</p>
+<p>
+One finding per node, because each node's restart is its own. A provider that does not report the option is not a provider with it off — it arrived in Galera 3.19.
+</p>
+<h3 id="repl-osu-method"><code>repl/osu-method</code></h3>
+<p>
+<code>wsrep_OSU_method</code> set to RSU. TOI replicates a schema change to every node and NBO does the same without holding the cluster-wide lock; <strong>RSU does not replicate it at all</strong> — it applies the change where it was run and leaves the others alone.
+</p>
+<p>
+That is precisely how the drift <a href="#schemadrift"><code>schema/drift</code></a> reports comes to exist, which is why this check is here: the cause reported next to the symptom is the difference between a finding and a diagnosis. RSU is something to turn on for one operation and off again, not a default.
+</p>
+<h3 id="cluster-peers"><code>cluster/peers</code></h3>
+<p>
+<code>wsrep_cluster_address</code> — the list of peers a node contacts when it starts — resolved against the nodes actually in the component, on every spelling each one answers to.
+</p>
+<p>
+It is only exercised at a restart, which is why nothing reports it. Three outcomes: a list naming servers this cluster does not have is <code>WARN</code> (the remaining peers still answer, but the list is one decommission away from naming nobody); a list naming <strong>no</strong> current member is <code>BAD</code> (this node cannot rejoin); and an empty <code>gcomm://</code> is <code>BAD</code> — that is the bootstrap form, and left in a running node's configuration it means the next restart forms a second Primary component instead of rejoining this one.
+</p>
+<h3 id="flow-settings"><code>flow/settings</code></h3>
+<p>
+<code>gcs.fc_limit</code>, <code>gcs.fc_factor</code> and the master-slave flags, compared across nodes. The cluster pauses when the slowest queue reaches <strong>its own</strong> limit, so the node configured with the smallest one paces every writer in the cluster. <a href="#flowpaused"><code>flow/paused</code></a> reports that pausing; this reports the reason, and names the node that throttles first.
+</p>
+<h3 id="repl-appliers"><code>repl/appliers</code></h3>
+<p>
+<code>wsrep_slave_threads</code> (or <code>wsrep_applier_threads</code>, its 10.6 name) differing between nodes, reported next to that node's receive queue. A node with a quarter of its peers' apply threads is behind by <strong>configuration</strong> rather than by load — which is a different fix from looking at its disk.
+</p>
+<h3 id="sst-size"><code>sst/size</code></h3>
+<p>
+What a rejoin actually copies: the data and index length of every application table, from the largest node, with the SST method beside it. "This node needs a full SST" is not actionable without the gigabytes it implies and the donor it takes out of service for the duration. A size is a number rather than a fault, so this is <code>OK</code>; <a href="#gcachewindow"><code>gcache/window</code></a> is the check that grades whether an SST is likely at all.
+</p>
+<h3 id="audit-changes"><code>audit/changes</code></h3>
+<p>
+What moved since the previous run: appeared, cleared, got worse, improved. Needs <code>--state</code>, because the answer lives in the state file — which carries the previous run's verdicts alongside its counters.
+</p>
+<p>
+The person reading this ran the audit twenty minutes ago and did something in between; what they need is not the same list again. Only the <strong>statuses</strong> are compared, never the messages: a message carries a measurement, and comparing prose would report a change every time a percentage moved by 0.1. The summary is always <code>OK</code> — every finding it mentions is in the same report with its own severity, and counting them twice makes one incident look like two.
+</p>
+<p>
+A cluster that could not be read at all still carries its findings forward, so "the node came back" is a transition rather than a silence.
+</p>
+<h3 id="audit-coverage"><code>audit/coverage</code></h3>
+<p>
+One line saying what this run could <strong>not</strong> audit: a node that could not be read, a missing <code>information_schema</code> grant, a clock that did not answer, a missing baseline.
+</p>
+<p>
+A cron job sees an exit code and a worst status, and neither distinguishes "nothing is wrong" from "the check that would have found it never ran". Access gaps are <code>WARN</code>, because a statement was not made. A missing baseline is named in the same line and does not escalate: running without <code>--state</code> is a choice, and warning about a choice on every run is how a check stops being read.
+</p>
+<h3 id="repl-sync-wait"><code>repl/sync-wait</code></h3>
+<p>
+The nodes disagreeing about <code>wsrep_sync_wait</code>. With it on, a read waits for the writes committed before it; with it off, the same query can return a row that is not there yet. When the nodes disagree the answer depends on which node the proxy picked, and every node is behaving exactly as configured. What the cluster <em>wants</em> is not this tool's business; the nodes not agreeing is.
+</p>
+<h3 id="repl-auto-increment"><code>repl/auto-increment</code></h3>
+<p>
+<code>wsrep_auto_increment_control</code> keeps the auto-increment step and offsets in line with the membership. With it off, the values are whatever somebody typed: two nodes sharing an <code>auto_increment_offset</code> is <code>BAD</code> (the ids collide as soon as both take writes, and the damage lands in application data), and a step smaller than the number of nodes is <code>WARN</code>.
+</p>
+<h3 id="repl-ws-limits"><code>repl/ws-limits</code></h3>
+<p>
+<code>wsrep_max_ws_size</code> and <code>wsrep_max_ws_rows</code> differing between nodes. A write-set is certified on the node that accepted it and then applied everywhere: an applier whose limit is smaller refuses it and leaves the cluster. That arrives as a node failure, and it is a configuration difference. The finding names the node holding the cluster's real limit — the smallest non-zero one, since 0 is "unlimited".
+</p>
+<h3 id="node-clock"><code>node/clock</code></h3>
+<p>
+The spread between the nodes' own clocks, read as <code>UNIX_TIMESTAMP(NOW(6))</code> in the same round trip as everything else — an epoch, so a server's <code>time_zone</code> cannot change the answer.
+</p>
+<p>
+The nodes are compared <strong>with each other</strong>, not with the machine running the audit, because this host's NTP is not a reference either. Replication is unaffected: Galera orders writes by sequence number, not by time. Everything a human does during an incident is affected — reading two error logs side by side, correlating a spike with a backup, believing a timestamp. Thresholds: <code>--clock-warn</code> (2s) and <code>--clock-bad</code> (30s). A clock that could not be read is reported as not graded rather than as a clock that agrees.
+</p>
+<h3 id="node-durability"><code>node/durability</code></h3>
+<p>
+<code>innodb_flush_log_at_trx_commit</code> and <code>sync_binlog</code> differing between nodes. A cluster's durability is its <strong>weakest</strong> node's, not its average: on a node that acknowledges a commit before the log reaches the disk, "committed on every node" survives a process crash and not a power cut.
+</p>
+<p>
+A uniform relaxed setting is not a finding — that is the cluster's decision, and this tool does not have an opinion about it. The nodes disagreeing is the finding.
+</p>
+<h3 id="cluster-latency"><code>cluster/latency</code></h3>
+<p>
+<code>wsrep_evs_repl_latency</code> — the cluster's <strong>own</strong> measurement of the round trip between a node and the group, printed as <code>min/avg/max/stddev/samples</code> in seconds — read next to the segment map.
+</p>
+<p>
+<a href="#queuerecv-queuesend"><code>queue/send</code></a> reports a deep queue and cannot say why: a node across a WAN link is doing exactly what physics allows, and a node with a failing disk in the same rack looks identical from there. So the comparison happens <strong>inside a segment</strong>, where distance is not an explanation: a node four times slower than the fastest of its own segment is a <code>WARN</code> that names the link and carries that node's send queue. Across segments the latency is reported and never graded — that is what the segment was configured for.
+</p>
+<p>
+Two guards keep it honest. <code>--latency-floor</code> (2ms) is the level below which a ratio is noise: 4x between 90µs and 350µs is not a finding, and grading it is how a check gets switched off. And zero samples is not zero latency — a provider that has measured nothing reports <code>0/0/0/0/0</code>, and that is <em>not graded</em> rather than the fastest cluster in the fleet.
+</p>
+<h3 id="cluster-segments"><code>cluster/segments</code></h3>
+<p>
+The <code>gmcast.segment</code> map, reported as the map it is: which nodes are in which segment. A write-set crosses a link once per segment rather than once per node, and the intent behind a particular map lives in somebody's head rather than in the server — so this is <code>OK</code> with the map in the message.
+</p>
+<p>
+The one shape that cannot be deliberate is graded: every node in a segment of its own, which turns the optimisation off entirely and makes every node pay the WAN transfer separately.
+</p>
+<h3 id="gcache-window"><code>gcache/window</code></h3>
+<p>
+Not the gcache size: the <strong>time</strong> it buys at the current write rate. 512 MB is forty minutes or ninety seconds depending on the workload, and the number decides whether a restarting node catches up incrementally or needs a full SST — which also takes a donor out of service. Needs <code>--state</code>; see <a href="rates.html">rates, not totals</a>.
+</p>
+<h2 id="against-the-proxy">Against the proxy</h2>
+<p>
+With <code>--proxysql</code>, the proxy's view is compared with the cluster's — the interesting state being the two disagreeing, which neither dashboard shows.
+</p>
+<div class="scroll"><table><thead><tr>
+<th>Check</th>
+<th>Grades</th>
+</tr></thead><tbody>
+<tr>
+<td><code>proxysql/read</code></td>
+<td>the admin interface answered. ERROR; the cluster findings still stand</td>
+</tr>
+<tr>
+<td><code>proxysql/missing</code></td>
+<td>a cluster node in no serving hostgroup: capacity nothing reaches, and a failover target that cannot take over</td>
+</tr>
+<tr>
+<td><code>proxysql/disagreement</code></td>
+<td>ONLINE while the node reports Joined (BAD), or shunned while the node reports Synced (WARN)</td>
+</tr>
+<tr>
+<td><code>proxysql/hostgroup</code></td>
+<td>a hostgroup with servers configured and none ONLINE: every query routed there fails</td>
+</tr>
+<tr>
+<td><code>proxysql/mapping</code></td>
+<td>the writer/reader/offline mapping, reported and <strong>not graded</strong></td>
+</tr>
+<tr>
+<td><code>proxysql/monitor</code></td>
+<td>the Galera monitor is not driving the hostgroups: <code>mysql-monitor_enabled=false</code>, or a hostgroup set with <code>active=0</code>. BAD — every finding above it is a photograph</td>
+</tr>
+</tbody></table></div>
+<p>
+The offline hostgroup — 999 in most deployments — is where ProxySQL's own Galera monitor parks nodes. Its contents are never a finding: flagging them is a permanent false positive, and "cleaning it up" fights the monitor.
+</p>
+<p>
+The same monitor is what keeps every one of those comparisons <em>live</em>, which is why <code>proxysql/monitor</code> exists: with the monitor off, the hostgroups still look exactly like a healthy cluster's — they just stopped following the one that is running. A proxy with no Galera hostgroup table at all is a deployment choice rather than a stopped monitor, and an unread variable is not a variable set to false: both stay quiet.
+</p>
+</main>
+<footer>
+  <a href="../">galera-doctor</a> ·
+  <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/checks.md">this page on GitHub</a> ·
+  MIT
+</footer>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Permissions and safety — galera-doctor</title>
+<meta name="description" content="Permissions and safety — galera-doctor, a read-only audit of a MariaDB/MySQL Galera cluster.">
+<link rel="canonical" href="https://allan-nava.github.io/galera-doctor/docs/safety.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="../mark.svg" type="image/svg+xml">
+<meta property="og:title" content="Permissions and safety — galera-doctor">
+<meta property="og:description" content="galera-doctor: the Galera states no wsrep_* counter can show you.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://allan-nava.github.io/galera-doctor/docs/safety.html">
+<meta property="og:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<nav>
+  <a class="home" href="../"><img src="../mark.svg" alt="" width="26" height="26"> galera-doctor</a>
+  <a href="https://github.com/Allan-Nava/galera-doctor">GitHub</a>
+</nav>
+<main>
+<h1>Permissions and safety</h1>
+<h2 id="the-grants">The grants</h2>
+<pre><code>
+CREATE USER 'audit'@'10.%' IDENTIFIED BY '…';
+GRANT USAGE, PROCESS, SELECT ON *.* TO 'audit'@'10.%';
+</code></pre>
+<ul>
+<li><code>USAGE</code> and <code>PROCESS</code> cover <code>SHOW GLOBAL STATUS</code> and <code>SHOW GLOBAL VARIABLES</code>.</li>
+<li><code>SELECT</code> is what <code>information_schema</code> needs for the system table drift comparison and the primary key check.</li>
+</ul>
+<p>
+Without the <code>information_schema</code> access, the drift check reports each node as <strong>not audited</strong> instead of quietly comparing fewer nodes than it claims. Run with <code>--no-systables --no-schema</code> if you would rather not grant it.
+</p>
+<p>
+For <code>--proxysql</code>, a read-only admin user on the admin interface (default port 6032) is enough: the tool reads <code>runtime_mysql_servers</code> and <code>runtime_mysql_galera_hostgroups</code>.
+</p>
+<h2 id="why-it-cannot-write">Why it cannot write</h2>
+<p>
+The promise is mechanical, not editorial:
+</p>
+<p>
+1. Every database access in the tool goes through one function, <code>cluster.Query</code>, which matches the statement against <code>^\s*(SHOW|SELECT)\s</code> and refuses anything else. 2. A test hands it <code>UPDATE</code>, <code>DELETE</code>, <code>SET GLOBAL</code>, <code>FLUSH</code>, <code>DROP</code> and <code>INSERT</code> and requires all of them to be rejected. 3. CI greps the source for a writing statement and for <code>db.Exec</code>, and fails the build on either.
+</p>
+<p>
+This matters because the tool is most useful during an incident, which is exactly when nobody has the patience to audit what a binary might do to a cluster.
+</p>
+<h2 id="cost-on-the-server">Cost on the server</h2>
+<ul>
+<li>Two <code>SHOW GLOBAL</code> reads per node: microseconds.</li>
+<li>One <code>information_schema.COLUMNS</code> read restricted to the <code>mysql</code> schema: tens of milliseconds on a normal instance.</li>
+<li>One <code>information_schema.TABLES</code>/<code>TABLE_CONSTRAINTS</code> join: this is the only query that can be slow on an instance with tens of thousands of tables. Turn it off with <code>--no-schema</code>.</li>
+</ul>
+<p>
+Nodes are read concurrently, one connection each, closed at the end of the run.
+</p>
+<h2 id="secrets">Secrets</h2>
+<p>
+A DSN — and therefore a password — is never printed. Findings identify nodes by their configured name, and driver errors are redacted before they are shown, because an error message ends up pasted into a ticket. Configuration files can keep passwords out entirely with <code>${ENV_VAR}</code> references.
+</p>
+</main>
+<footer>
+  <a href="../">galera-doctor</a> ·
+  <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/safety.md">this page on GitHub</a> ·
+  MIT
+</footer>
+</body>
+</html>

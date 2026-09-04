@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rates, not totals — galera-doctor</title>
+<meta name="description" content="Rates, not totals — galera-doctor, a read-only audit of a MariaDB/MySQL Galera cluster.">
+<link rel="canonical" href="https://allan-nava.github.io/galera-doctor/docs/rates.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="../mark.svg" type="image/svg+xml">
+<meta property="og:title" content="Rates, not totals — galera-doctor">
+<meta property="og:description" content="galera-doctor: the Galera states no wsrep_* counter can show you.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://allan-nava.github.io/galera-doctor/docs/rates.html">
+<meta property="og:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<nav>
+  <a class="home" href="../"><img src="../mark.svg" alt="" width="26" height="26"> galera-doctor</a>
+  <a href="https://github.com/Allan-Nava/galera-doctor">GitHub</a>
+</nav>
+<main>
+<h1>Rates, not totals</h1>
+<p>
+The <code>wsrep_*</code> counters only ever go up, and they reset when the server restarts. That makes them useless as thresholds:
+</p>
+<ul>
+<li><code>wsrep_flow_control_paused</code> is the fraction of the time <strong>since the last status reset</strong> that the node spent flow-controlling. A cluster that struggled for ten minutes last March reports the same number today as it did the day after.</li>
+<li><code>wsrep_local_cert_failures</code> is a lifetime count. Divided by nothing, it is a number that only grows.</li>
+</ul>
+<p>
+A check built on either goes red once and stays red, and a check that stays red is one people learn to silence.
+</p>
+<h2 id="what-galera-doctor-does-instead">What galera-doctor does instead</h2>
+<p>
+<code>--state FILE</code> writes the counters after every run. The next run diffs them and grades the <strong>interval</strong>:
+</p>
+<pre><code>
+  WARN  flow/paused   sg-01   flow-controlled 2.10% of the last 10m0s
+        ↳ this node is intermittently the slowest in the cluster; look at its disk and its replication threads
+</code></pre>
+<p>
+Without a baseline, the same check reports the lifetime figure and refuses to judge it:
+</p>
+<pre><code>
+  OK    flow/paused   sg-01   0.9% of the time since the last status reset (not graded: no baseline)
+        ↳ run again with --state to grade the interval between runs instead of the lifetime total
+</code></pre>
+<p>
+The same applies to <code>repl/cert-failures</code> (conflicts as a share of the writesets in the interval) and to <code>gcache/window</code> (the gcache size divided by the write rate in the interval).
+</p>
+<h2 id="when-there-is-no-baseline">When there is no baseline</h2>
+<p>
+All of these mean <em>no baseline</em>, and none of them produce a number:
+</p>
+<ul>
+<li>no state file yet — the first run of anything;</li>
+<li>the node was not in the previous run;</li>
+<li>the counter went <strong>backwards</strong>: the server restarted, or somebody ran <code>FLUSH STATUS</code>. Reading the difference would invent an incident, and after a wraparound, a spectacular one;</li>
+<li>the node's uptime is shorter than it was last time — a restart, caught even when the counter has already climbed past its old value;</li>
+<li>the interval is zero or negative, so there is nothing to divide by;</li>
+<li>the state file is from another format version, or unreadable. The audit still runs; the rates do not.</li>
+</ul>
+<p>
+The state file is a cache, never a source of truth. Delete it and the next run simply has nothing to compare against — it says so.
+</p>
+<h2 id="what-else-the-file-carries">What else the file carries</h2>
+<p>
+Format <strong>2</strong> added the previous run's verdicts — one status per <code>check@target</code>, never the messages — which is what <a href="checks.html#auditchanges"><code>audit/changes</code></a> compares. A file from format 1 is ignored rather than migrated: read as "that run found nothing", it would report every current finding as newly appeared. One ungraded run is the worst outcome of a stale cache, and that is the deal.
+</p>
+<p>
+One file can cover a whole <code>--config</code>, so everything in it is namespaced by cluster (<code>compress/sg-01</code>) and the audit is handed one cluster's view of it. That indirection is load-bearing: without it the lookup misses on every run and every counter check reports <em>not graded: no baseline</em> forever — which looks exactly like a cluster with nothing to grade.
+</p>
+</main>
+<footer>
+  <a href="../">galera-doctor</a> ·
+  <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/rates.md">this page on GitHub</a> ·
+  MIT
+</footer>
+</body>
+</html>

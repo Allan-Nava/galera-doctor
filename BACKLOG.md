@@ -116,9 +116,9 @@ touching this file, or CI will fail.
   `SHA256SUMS` the release workflow computed over the bytes it uploaded — a
   checksum somebody retyped is a formula that fails on the one machine that
   matters. <!-- gd: prio=med size=S labels=delivery ver=0.3.0 -->
-- [ ] **GD-21 — Docs site**: `docs/` published with the same POSIX-sh generator
+- [x] **GD-21 — Docs site**: `docs/` published with the same POSIX-sh generator
   the sibling tools use, with a dead-link gate in CI.
-  <!-- gd: prio=med size=M labels=docs -->
+  <!-- gd: prio=med size=M labels=docs ver=0.9.0 -->
 - [ ] **GD-22 — Percona XtraDB Cluster and MySQL Group Replication**: the first
   is nearly free, the second is a different model and needs its own checks
   rather than a rename. <!-- gd: prio=low size=XL labels=check -->

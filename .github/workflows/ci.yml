@@ -130,6 +130,8 @@ jobs:
         run: sh scripts/repo_test.sh
       - name: The Homebrew formula
         run: sh scripts/brew_test.sh
+      - name: The docs renderer
+        run: sh scripts/docs_test.sh
       # The landing page's SEO is a set of tags nothing renders: a missing
       # canonical or a relative og:image fails no browser and no build.
       - name: The landing page says what it is
@@ -142,6 +144,11 @@ jobs:
       # the page needs no build step. A copy that drifts is a wrong logo.
       - name: The site carries the current logo
         run: ./scripts/site.sh check
+
+      # The reference pages are generated from docs/*.md, so an edited document
+      # with an unbuilt page is a site that contradicts the repository.
+      - name: The published docs are current
+        run: ./scripts/docs.sh check
 
       # A fork's About box is its own business.
       - name: The About box matches .github/repo.env

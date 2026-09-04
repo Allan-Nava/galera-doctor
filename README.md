@@ -247,6 +247,11 @@ GD_TEST_DSN='root:testpw@tcp(127.0.0.1:13306)/' go test ./internal/cluster/ -run
 will never become: [INTENT.md](INTENT.md). Contributor brief:
 [AGENTS.md](AGENTS.md).
 
+The reference pages at
+[allan-nava.github.io/galera-doctor](https://allan-nava.github.io/galera-doctor/)
+are generated from the same `docs/*.md` that render on GitHub — one source per
+document, and a CI gate that fails when a page is stale.
+
 Everything around the code is a POSIX-sh script with a CI gate behind it, so a
 stale generated file fails the build instead of rotting:
 
@@ -256,6 +261,7 @@ scripts/release.sh build 0.0.0-dev dist   # the release artefacts, locally
 scripts/brew.sh render v0.0.0-dev dist/SHA256SUMS  # the formula they imply
 scripts/links.sh             # every local link in the docs and the site resolves
 scripts/site.sh serve        # the landing page in site/, on localhost:8000
+scripts/docs.sh build        # render docs/*.md into site/docs/
 scripts/og.sh                # re-render the preview card at 1200x630
 scripts/repo.sh apply        # write .github/repo.env to the GitHub About box
 ```

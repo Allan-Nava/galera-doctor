@@ -6,6 +6,43 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.9.0] - 2026-09-04
+
+### Added
+
+- **The reference pages are published** (GD-21) — `scripts/docs.sh` renders
+  `docs/*.md` into `site/docs/`, so the landing page links its own
+  documentation instead of sending everybody to GitHub's Markdown view. One
+  source per document, one stylesheet generated with the pages, a `check`
+  subcommand that fails when a page has fallen behind its source, and the
+  sitemap now lists every published page with the commit date of the document
+  behind it.
+
+  The renderer is awk, and the Markdown subset is deliberately the one these
+  docs use — headings, paragraphs, fenced blocks, tables, lists, blockquotes,
+  bold, emphasis, inline code, links. Anything else is escaped and passed
+  through as text rather than guessed at: a renderer that guesses produces a
+  page that still looks plausible, which is worse than one that leaves a line
+  alone.
+
+  `scripts/docs_test.sh` (42 checks) is what makes that safe, and it earned its
+  place immediately — five real bugs, every one of which produced a page that
+  looked finished:
+
+  - `**`code`**` — bold wrapping a code span, which these docs are full of —
+    left both markers stranded, because code spans were taken out first and
+    `bold()` only ever saw the fragments.
+  - a `**bold**` span that a Markdown author wrapped across two lines never
+    closed, since the inline pass ran line by line. Paragraphs and list items
+    are buffered to the end of the block now.
+  - `*emphasis*` was not implemented at all and reached the browser as
+    asterisks.
+  - restoring a code span with `sub()` reads an `&` in the replacement as the
+    whole match, so `&lt;` came back as `lt;` — the escaping undone by the
+    unescaping. It is done with `index()` and `substr()` instead.
+  - an apostrophe in an awk comment closed the single-quoted shell string
+    around the whole program.
+
 ## [0.8.0] - 2026-09-03
 
 ### Added

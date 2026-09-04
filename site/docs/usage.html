@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usage — galera-doctor</title>
+<meta name="description" content="Usage — galera-doctor, a read-only audit of a MariaDB/MySQL Galera cluster.">
+<link rel="canonical" href="https://allan-nava.github.io/galera-doctor/docs/usage.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="../mark.svg" type="image/svg+xml">
+<meta property="og:title" content="Usage — galera-doctor">
+<meta property="og:description" content="galera-doctor: the Galera states no wsrep_* counter can show you.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://allan-nava.github.io/galera-doctor/docs/usage.html">
+<meta property="og:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<nav>
+  <a class="home" href="../"><img src="../mark.svg" alt="" width="26" height="26"> galera-doctor</a>
+  <a href="https://github.com/Allan-Nava/galera-doctor">GitHub</a>
+</nav>
+<main>
+<h1>Usage</h1>
+<pre><code>
+galera-doctor audit [flags]
+galera-doctor checks
+galera-doctor version
+</code></pre>
+<h2 id="where-the-nodes-come-from">Where the nodes come from</h2>
+<p>
+Either a config file:
+</p>
+<pre><code>
+{
+  "clusters": {
+    "compress": {
+      "nodes": [
+        {"name": "sg-01", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.11.1.5:3306)/"},
+        {"name": "cl-02", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.21.1.5:3306)/"},
+        {"name": "ov-03", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.35.1.5:3306)/"}
+      ],
+      "proxysql_dsn": "admin:${PROXYSQL_ADMIN_PASS}@tcp(10.11.1.9:6032)/",
+      "expect_nodes": 3
+    }
+  }
+}
+</code></pre>
+<p>
+...or the command line, with <code>--node</code> repeated:
+</p>
+<pre><code>
+galera-doctor audit \
+  --node "sg-01=audit:$PASS@tcp(10.11.1.5:3306)/" \
+  --node "cl-02=audit:$PASS@tcp(10.21.1.5:3306)/"
+</code></pre>
+<p>
+<code>${ENV_VAR}</code> is expanded in every DSN. An <strong>unset</strong> variable is an error, not an empty string: a DSN with an empty password fails with "access denied", which is a bad way to learn that a variable is missing. Unknown keys in the file are rejected too — a typo in <code>"noeds"</code> would otherwise produce a cluster with no nodes.
+</p>
+<p>
+A DSN is never printed. Findings identify nodes by name, and a driver error that quotes a DSN is redacted first.
+</p>
+<h2 id="flags">Flags</h2>
+<div class="scroll"><table><thead><tr>
+<th>Flag</th>
+<th>Default</th>
+<th>What it does</th>
+</tr></thead><tbody>
+<tr>
+<td><code>--config FILE</code></td>
+<td>—</td>
+<td>cluster definitions (JSON)</td>
+</tr>
+<tr>
+<td><code>--cluster NAME</code></td>
+<td>all</td>
+<td>audit one cluster from the config</td>
+</tr>
+<tr>
+<td><code>--node name=DSN</code></td>
+<td>—</td>
+<td>a node, repeatable</td>
+</tr>
+<tr>
+<td><code>--proxysql DSN</code></td>
+<td>—</td>
+<td>ProxySQL admin interface to compare against</td>
+</tr>
+<tr>
+<td><code>--state FILE</code></td>
+<td>—</td>
+<td>remember counters between runs so rates can be graded</td>
+</tr>
+<tr>
+<td><code>--expect-nodes N</code></td>
+<td>nodes given</td>
+<td>membership the cluster should report</td>
+</tr>
+<tr>
+<td><code>--timeout D</code></td>
+<td><code>10s</code></td>
+<td>per-node timeout — one dead node does not decide the run's length</td>
+</tr>
+<tr>
+<td><code>--no-systables</code></td>
+<td>off</td>
+<td>skip the system table drift comparison</td>
+</tr>
+<tr>
+<td><code>--no-schema</code></td>
+<td>off</td>
+<td>skip the primary key check</td>
+</tr>
+<tr>
+<td><code>--flow-warn F</code> / <code>--flow-bad F</code></td>
+<td><code>0.01</code> / <code>0.10</code></td>
+<td>flow-control share of the interval</td>
+</tr>
+<tr>
+<td><code>--ist-warn D</code></td>
+<td><code>30m</code></td>
+<td>gcache window below which a restart means a full SST</td>
+</tr>
+<tr>
+<td><code>--json</code> / <code>--findings</code></td>
+<td>—</td>
+<td>full report / flat findings array</td>
+</tr>
+<tr>
+<td><code>--min-severity S</code></td>
+<td>—</td>
+<td>hide findings below <code>S</code></td>
+</tr>
+<tr>
+<td><code>--exit-on S</code></td>
+<td>never</td>
+<td>exit 1 when a finding reaches <code>S</code></td>
+</tr>
+</tbody></table></div>
+<h2 id="exit-status">Exit status</h2>
+<div class="scroll"><table><thead><tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr></thead><tbody>
+<tr>
+<td><code>0</code></td>
+<td>the audit ran — findings are output, not an error</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td><code>--exit-on</code> threshold reached</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>usage error, or no node could be resolved</td>
+</tr>
+</tbody></table></div>
+<h2 id="in-a-scheduled-job">In a scheduled job</h2>
+<pre><code>
+galera-doctor audit --config /etc/galera-doctor/clusters.json \
+  --state /var/lib/galera-doctor/state.json \
+  --findings --min-severity WARN --exit-on BAD &gt; findings.json
+</code></pre>
+<p>
+The state file is written <strong>after</strong> the output, so a failure to persist a baseline costs the next run its rates and nothing else.
+</p>
+</main>
+<footer>
+  <a href="../">galera-doctor</a> ·
+  <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/usage.md">this page on GitHub</a> ·
+  MIT
+</footer>
+</body>
+</html>

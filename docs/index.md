@@ -24,3 +24,10 @@ BAD   compress  3 node(s)
 Three nodes, one cluster, every replication counter green — and one of them has
 been holding a different definition of a system table since somebody ran
 `mysql_upgrade` on two of the three.
+
+---
+
+These pages are published at
+[allan-nava.github.io/galera-doctor](https://allan-nava.github.io/galera-doctor/),
+rendered from this directory by `scripts/docs.sh` — the Markdown here is the
+only source, and CI fails when a published page has fallen behind it.
