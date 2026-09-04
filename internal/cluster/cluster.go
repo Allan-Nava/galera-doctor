@@ -141,6 +141,53 @@ func (s Snapshot) ProviderOption(name string) (string, bool) {
 	return "", false
 }
 
+// ReplLatency parses wsrep_evs_repl_latency, which is the cluster's own
+// measurement of the round trip between this node and the group. Galera prints
+// it as min/avg/max/stddev/samples in seconds.
+//
+// The bool is false for a missing value, an unparseable one, *and* for zero
+// samples: a provider that has not measured anything yet reports 0/0/0/0/0,
+// and reading that as "no latency" would make an unmeasured cluster look like
+// the fastest one in the fleet.
+func (s Snapshot) ReplLatency() (avg, max time.Duration, ok bool) {
+	v, found := s.Get("wsrep_evs_repl_latency")
+	if !found {
+		return 0, 0, false
+	}
+	parts := strings.Split(strings.TrimSpace(v), "/")
+	if len(parts) < 5 {
+		return 0, 0, false
+	}
+	samples, err := strconv.ParseFloat(strings.TrimSpace(parts[4]), 64)
+	if err != nil || samples <= 0 {
+		return 0, 0, false
+	}
+	seconds := func(i int) (time.Duration, bool) {
+		f, err := strconv.ParseFloat(strings.TrimSpace(parts[i]), 64)
+		if err != nil || f < 0 {
+			return 0, false
+		}
+		return time.Duration(f * float64(time.Second)), true
+	}
+	a, ok1 := seconds(1)
+	m, ok2 := seconds(2)
+	if !ok1 || !ok2 {
+		return 0, 0, false
+	}
+	return a, m, true
+}
+
+// Segment is the node's gmcast.segment, or "" when the provider does not report
+// one. Nodes in the same segment are meant to be near each other; that is the
+// whole content of the setting.
+func (s Snapshot) Segment() string {
+	v, ok := s.ProviderOption("gmcast.segment")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(v)
+}
+
 // Bytes parses a size written the way Galera writes it: a plain number of
 // bytes, or a number with a K/M/G/T suffix.
 func Bytes(s string) (int64, bool) {

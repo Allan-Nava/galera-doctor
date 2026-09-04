@@ -19,15 +19,18 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 		Node: name,
 		At:   at,
 		Status: map[string]string{
-			"wsrep_cluster_state_uuid":     "5b1e2a8c-1111-11ef-9d2b-000000000001",
-			"wsrep_cluster_conf_id":        "42",
-			"wsrep_cluster_size":           "3",
-			"wsrep_cluster_status":         "Primary",
-			"wsrep_local_state_comment":    "Synced",
-			"wsrep_ready":                  "ON",
-			"wsrep_connected":              "ON",
-			"wsrep_local_recv_queue":       "0",
-			"wsrep_local_send_queue":       "0",
+			"wsrep_cluster_state_uuid":  "5b1e2a8c-1111-11ef-9d2b-000000000001",
+			"wsrep_cluster_conf_id":     "42",
+			"wsrep_cluster_size":        "3",
+			"wsrep_cluster_status":      "Primary",
+			"wsrep_local_state_comment": "Synced",
+			"wsrep_ready":               "ON",
+			"wsrep_connected":           "ON",
+			"wsrep_local_recv_queue":    "0",
+			"wsrep_local_send_queue":    "0",
+			// The cluster's own measurement of how far apart its nodes are:
+			// min/avg/max/stddev/samples, in seconds.
+			"wsrep_evs_repl_latency":       "0.000228/0.000544/0.001121/0.000202/15",
 			"wsrep_provider_version":       "26.4.16(r)",
 			"wsrep_flow_control_paused_ns": "0",
 			"wsrep_flow_control_paused":    "0.0",
@@ -1551,5 +1554,115 @@ func TestAnUnreadableClusterStillCarriesItsFindingsForwards(t *testing.T) {
 	f := one(t, back, "audit/changes")
 	if !strings.Contains(f.Message, "cleared") || !strings.Contains(f.Message, "cluster/membership") {
 		t.Fatalf("a cluster that came back is the clearest transition there is: %q", f.Message)
+	}
+}
+
+// GD-17 — slow, or simply far away.
+//
+// A deep send queue is reported by queue/send and says nothing about the
+// cause: a node across a WAN link is doing exactly what physics allows, and a
+// node with a failing disk in the same rack looks identical from there. The
+// cluster measures the round trip itself, in wsrep_evs_repl_latency, and the
+// segment map says which pairs are supposed to be far apart.
+func TestANodeSlowWithinItsOwnSegmentIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_provider_options"] = "gcache.size = 512M; gmcast.segment = 0;"
+	}
+	// 12ms inside a segment whose other members are at half a millisecond.
+	snaps[1].Status["wsrep_evs_repl_latency"] = "0.008/0.012/0.030/0.004/15"
+	snaps[1].Status["wsrep_local_send_queue"] = "9"
+
+	rep := Run(snaps, nil, opts())
+	var f *finding.Finding
+	for i := range rep.Findings {
+		if rep.Findings[i].Check == "cluster/latency" && rep.Findings[i].Target == "cl-02" {
+			f = &rep.Findings[i]
+		}
+	}
+	if f == nil || f.Status != finding.WARN {
+		t.Fatalf("a node slow inside its own segment is a finding: %+v", rep.Findings)
+	}
+	if !strings.Contains(f.Message, "segment 0") {
+		t.Fatalf("the message must say the comparison was inside one segment: %q", f.Message)
+	}
+	// The whole point is the attribution, so the hint must rule distance out.
+	if !strings.Contains(f.Hint, "not distance") {
+		t.Fatalf("the hint has to say this is not distance: %q", f.Hint)
+	}
+	if !strings.Contains(f.Hint, "9") {
+		t.Fatalf("the hint must carry that node's send queue: %q", f.Hint)
+	}
+}
+
+// The same latency in a segment of its own is a WAN link behaving like a WAN
+// link. Reported, never graded.
+func TestANodeFarAwayIsNotAFinding(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["wsrep_provider_options"] = "gcache.size = 512M; gmcast.segment = 0;"
+	snaps[1].Vars["wsrep_provider_options"] = "gcache.size = 512M; gmcast.segment = 0;"
+	snaps[2].Vars["wsrep_provider_options"] = "gcache.size = 512M; gmcast.segment = 1;"
+	snaps[2].Status["wsrep_evs_repl_latency"] = "0.020/0.024/0.031/0.003/15"
+
+	rep := Run(snaps, nil, opts())
+	for _, f := range byCheck(t, rep, "cluster/latency") {
+		if f.Target == "ov-03" && f.Status != finding.OK {
+			t.Fatalf("a node in its own segment is far away, not slow: %+v", f)
+		}
+	}
+}
+
+// The map itself is worth one line: it is what makes "far away" a fact rather
+// than an assumption.
+func TestTheLatencyMapIsReported(t *testing.T) {
+	f := one(t, Run(threeHealthy(), nil, opts()), "cluster/latency")
+	if f.Status != finding.OK {
+		t.Fatalf("a healthy cluster's latency is a measurement, not a fault: %+v", f)
+	}
+	// A duration in whatever unit reads best at that magnitude: 544µs, not
+	// 0.000544 seconds and not 0.544 milliseconds.
+	if !strings.Contains(f.Message, "µs") && !strings.Contains(f.Message, "ms") {
+		t.Fatalf("the message must carry the measurement in something readable: %q", f.Message)
+	}
+	if !strings.Contains(f.Message, "segment 0") {
+		t.Fatalf("the map must name the segments: %q", f.Message)
+	}
+}
+
+// Microsecond differences are not a finding: a 4x ratio between 90µs and 350µs
+// is noise, and grading it is how a check becomes something people switch off.
+func TestSmallLatencyDifferencesAreNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Status["wsrep_evs_repl_latency"] = "0.0002/0.00035/0.0009/0.0001/15"
+	rep := Run(snaps, nil, opts())
+	for _, f := range byCheck(t, rep, "cluster/latency") {
+		if f.Status != finding.OK {
+			t.Fatalf("a fraction of a millisecond is not a finding: %+v", f)
+		}
+	}
+}
+
+// A provider that does not report the metric is not a cluster with no latency.
+func TestAnUnreportedLatencyIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Status, "wsrep_evs_repl_latency")
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "cluster/latency"); len(fs) != 0 {
+		t.Fatalf("a metric nobody reported cannot be graded: %+v", fs)
+	}
+}
+
+// Galera prints the counter as min/avg/max/stddev/samples and zeroes it when
+// no samples have been taken. Zero samples is not zero latency.
+func TestALatencyWithNoSamplesIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Status["wsrep_evs_repl_latency"] = "0/0/0/0/0"
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "cluster/latency"); len(fs) != 0 {
+		t.Fatalf("no samples means nothing was measured: %+v", fs)
 	}
 }

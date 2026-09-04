@@ -6,6 +6,26 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.8.0] - 2026-09-03
+
+### Added
+
+- **`cluster/latency`** (GD-17) — slow, or simply far away. `queue/send`
+  reports a deep queue and cannot say why: a node across a WAN link is doing
+  exactly what physics allows, and a node with a failing disk in the same rack
+  looks identical from there. Two things the cluster already knows make the
+  distinction — `wsrep_evs_repl_latency`, its own measurement of the round trip,
+  and `gmcast.segment`, which says which pairs are *supposed* to be far apart.
+
+  So the comparison happens inside a segment, where distance is not an
+  explanation: a node four times slower than the fastest of its own segment is
+  a `WARN` naming the link, carrying that node's send queue in the hint. Across
+  segments the latency is reported and never graded. Two guards keep it from
+  becoming noise: `--latency-floor` (2ms), below which a ratio between
+  microseconds is not a finding, and zero samples — a provider that has
+  measured nothing reports `0/0/0/0/0`, which is *not graded* rather than the
+  fastest cluster in the fleet.
+
 ## [0.7.0] - 2026-09-03
 
 ### Added

@@ -95,9 +95,9 @@ touching this file, or CI will fail.
 - [x] **GD-16 — Node clock skew**: compare each node's clock with the auditing
   host. Certification and log correlation both suffer, and it is one query.
   <!-- gd: prio=med size=S labels=check ver=0.5.0 -->
-- [ ] **GD-17 — Cross-DC latency from the cluster's own numbers**: segment
+- [x] **GD-17 — Cross-DC latency from the cluster's own numbers**: segment
   configuration versus the observed apply and send queues, to say whether a
-  node is slow or simply far away. <!-- gd: prio=med size=L labels=check -->
+  node is slow or simply far away. <!-- gd: prio=med size=L labels=check ver=0.8.0 -->
 - [ ] **GD-18 — Watch mode**: re-audit on an interval and print only the
   transitions, for the window in which a cluster is being repaired.
   <!-- gd: prio=low size=M labels=cli -->

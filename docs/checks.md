@@ -270,6 +270,26 @@ A uniform relaxed setting is not a finding — that is the cluster's decision, a
 this tool does not have an opinion about it. The nodes disagreeing is the
 finding.
 
+### `cluster/latency`
+
+`wsrep_evs_repl_latency` — the cluster's **own** measurement of the round trip
+between a node and the group, printed as `min/avg/max/stddev/samples` in
+seconds — read next to the segment map.
+
+[`queue/send`](#queuerecv-queuesend) reports a deep queue and cannot say why: a
+node across a WAN link is doing exactly what physics allows, and a node with a
+failing disk in the same rack looks identical from there. So the comparison
+happens **inside a segment**, where distance is not an explanation: a node four
+times slower than the fastest of its own segment is a `WARN` that names the
+link and carries that node's send queue. Across segments the latency is
+reported and never graded — that is what the segment was configured for.
+
+Two guards keep it honest. `--latency-floor` (2ms) is the level below which a
+ratio is noise: 4x between 90µs and 350µs is not a finding, and grading it is
+how a check gets switched off. And zero samples is not zero latency — a
+provider that has measured nothing reports `0/0/0/0/0`, and that is *not
+graded* rather than the fastest cluster in the fleet.
+
 ### `cluster/segments`
 
 The `gmcast.segment` map, reported as the map it is: which nodes are in which

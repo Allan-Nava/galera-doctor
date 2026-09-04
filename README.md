@@ -34,6 +34,7 @@ These are the states this tool exists for:
 | **A split brain that is already configured** | `pc.ignore_sb` left on after somebody recovered a cluster by hand, or quorum weights that are not one vote per node. Nothing is exercised until the network moves — and then both sides stay writable. |
 | **Tables Galera does not replicate at all** | A MyISAM or Aria table in an application schema. The write succeeds, nothing certifies it, no counter records it, and the rows exist on exactly one node. |
 | **Durability that is not the cluster's** | A cluster's durability is its weakest node's, not its average. One node acknowledging a commit before its log reaches the disk turns "committed on three nodes" into something else — and each node is doing exactly what it was told, so nothing reports it. |
+| **Slow, or simply far away** | A deep send queue says nothing about the cause: a node across a WAN link is doing what physics allows, and a node with a failing disk in the same rack looks identical from there. `wsrep_evs_repl_latency` and the segment map together say which one it is. |
 | **A node that cannot find its cluster** | `wsrep_cluster_address` is only read at startup. A list naming two decommissioned servers — or an empty `gcomm://` left behind after a bootstrap — belongs to a node that is Synced and green today and forms its own cluster tomorrow. |
 | **Flow control that already happened** | `wsrep_flow_control_paused` covers the time since the last status reset, so an incident from March reads the same today. Graded as a lifetime total it goes red once and stays red. |
 
@@ -98,6 +99,7 @@ repl/ws-limits                             appliers that will refuse a write-set
 node/clock                                 the spread between the nodes' own clocks
 node/durability                            a cluster whose durability is one node's, not its average
 cluster/segments                           the segment map, and the one shape that cannot be deliberate
+cluster/latency                            slow, or simply far away: the cluster's own round-trip measurement
 cluster/peers                              a peer list that describes a cluster which no longer exists
 flow/settings                              one node's flow-control limit pacing every writer
 repl/appliers                              a node that applies with fewer threads than its peers

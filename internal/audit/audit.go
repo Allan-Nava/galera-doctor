@@ -41,6 +41,10 @@ type Options struct {
 	// ISTWarn is the shortest gcache window worth having: below it, a node that
 	// restarts is likely to need a full SST instead of an incremental transfer.
 	ISTWarn time.Duration
+	// LatencyFloor is the replication latency below which a difference between
+	// nodes in one segment is noise: a 4x ratio between 90µs and 350µs is not
+	// a finding, and grading it is how a check gets switched off.
+	LatencyFloor time.Duration
 	// ClockWarn and ClockBad are the spread between the nodes' own clocks. The
 	// nodes are compared with each other, not with the auditing host, so a
 	// threshold here is about the cluster rather than about this machine's NTP.
@@ -56,6 +60,7 @@ func DefaultOptions() Options {
 		FlowBad:       0.10,
 		RecvQueueWarn: 10,
 		ISTWarn:       30 * time.Minute,
+		LatencyFloor:  2 * time.Millisecond,
 		ClockWarn:     2 * time.Second,
 		ClockBad:      30 * time.Second,
 		Now:           time.Now(),
@@ -155,6 +160,7 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(flowSettings(rep.Cluster, live)...)
 	add(appliers(rep.Cluster, live)...)
 	add(sstSize(rep.Cluster, live)...)
+	add(latency(rep.Cluster, live, opt)...)
 	add(coverage(rep.Cluster, snaps, live, prev)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
@@ -1790,6 +1796,110 @@ func carry(fs []finding.Finding) map[string]string {
 		}
 		out[state.Key(f.Check, f.Target)] = string(f.Status)
 	}
+	return out
+}
+
+// latencySlowFactor is how much slower than its own segment's fastest peer a
+// node has to be before it is a finding. A ratio rather than a threshold,
+// because the right absolute number is different in every rack and every
+// datacentre — and LatencyFloor keeps a ratio between microseconds out of the
+// report.
+const latencySlowFactor = 4
+
+// latency says whether a node is slow or simply far away (GD-17).
+//
+// queue/send reports a deep queue and cannot say why: a node across a WAN link
+// is doing exactly what physics allows, and a node with a failing disk in the
+// same rack looks identical from there. Two things the cluster already knows
+// make the distinction — wsrep_evs_repl_latency, which is its own measurement
+// of the round trip, and gmcast.segment, which says which pairs are *supposed*
+// to be far apart.
+//
+// So the comparison happens inside a segment. Across segments the latency is
+// reported and never graded: that is what the segment was configured for.
+func latency(name string, live []cluster.Snapshot, opt Options) []finding.Finding {
+	type sample struct {
+		node    string
+		segment string
+		avg     time.Duration
+		max     time.Duration
+	}
+	var samples []sample
+	for _, s := range live {
+		avg, max, ok := s.ReplLatency()
+		if !ok {
+			continue
+		}
+		seg := s.Segment()
+		if seg == "" {
+			seg = "0" // the default, and the only sensible name for "unset"
+		}
+		samples = append(samples, sample{node: s.Node, segment: seg, avg: avg, max: max})
+	}
+	if len(samples) == 0 {
+		return nil
+	}
+
+	bySegment := map[string][]sample{}
+	for _, s := range samples {
+		bySegment[s.segment] = append(bySegment[s.segment], s)
+	}
+	segs := make([]string, 0, len(bySegment))
+	for seg := range bySegment {
+		segs = append(segs, seg)
+	}
+	sort.Strings(segs)
+
+	var out []finding.Finding
+	parts := make([]string, 0, len(segs))
+	for _, seg := range segs {
+		in := bySegment[seg]
+		fastest := in[0]
+		var total time.Duration
+		for _, s := range in {
+			if s.avg < fastest.avg {
+				fastest = s
+			}
+			total += s.avg
+		}
+		parts = append(parts, fmt.Sprintf("segment %s: %s avg over %d node(s)",
+			seg, (total/time.Duration(len(in))).Round(time.Microsecond), len(in)))
+
+		// Inside one segment, distance is not an explanation.
+		for _, s := range in {
+			if s.node == fastest.node || len(in) < 2 {
+				continue
+			}
+			if s.avg < opt.LatencyFloor || s.avg < time.Duration(latencySlowFactor)*fastest.avg {
+				continue
+			}
+			hint := fmt.Sprintf("same segment, so this is not distance: the link to %s, or that node itself. ", s.node)
+			for _, l := range live {
+				if l.Node != s.node {
+					continue
+				}
+				if q, ok := l.Float("wsrep_local_send_queue"); ok {
+					hint += fmt.Sprintf("Its send queue is %s", trimFloat(q))
+				}
+			}
+			out = append(out, finding.Finding{
+				Check: "cluster/latency", Target: s.node, Status: finding.WARN,
+				Message: fmt.Sprintf("replicates at %s in segment %s, %.0fx the %s of %s",
+					s.avg.Round(time.Microsecond), s.segment,
+					float64(s.avg)/float64(fastest.avg), fastest.avg.Round(time.Microsecond), fastest.node),
+				Value: finding.Num(s.avg.Seconds() * 1000), Unit: "ms",
+				Hint: strings.TrimSpace(hint),
+			})
+		}
+	}
+
+	// The map itself, which is what makes "far away" a fact rather than an
+	// assumption.
+	out = append(out, finding.Finding{
+		Check: "cluster/latency", Target: name, Status: finding.OK,
+		Message: "replication latency as the cluster measures it — " + strings.Join(parts, "; "),
+		Hint:    "across segments this is distance and nothing to fix; inside one it is the link or the node",
+	})
 	return out
 }
 

@@ -75,6 +75,8 @@ flags:
   --ist-warn D             gcache window below which a restart means a full SST (default 30m)
   --clock-warn D           spread between node clocks to WARN at (default 2s)
   --clock-bad D            ... and to call BAD (default 30s)
+  --latency-floor D        replication latency below which a difference inside
+                           a segment is noise (default 2ms)
   --json                   full report
   --findings               flat findings array
   --min-severity S         hide findings below S (OK|WARN|BAD|ERROR)
@@ -120,6 +122,7 @@ func cmdChecks() int {
 		{"node/clock", "the spread between the nodes' own clocks"},
 		{"node/durability", "a cluster whose durability is one node's, not its average"},
 		{"cluster/segments", "the segment map, and the one shape that cannot be deliberate"},
+		{"cluster/latency", "slow, or simply far away: the cluster's own round-trip measurement"},
 		{"cluster/peers", "a peer list that describes a cluster which no longer exists"},
 		{"flow/settings", "one node's flow-control limit pacing every writer"},
 		{"repl/appliers", "a node that applies with fewer threads than its peers"},
@@ -170,6 +173,7 @@ func cmdAudit(args []string) int {
 		flowBad     = fs.Float64("flow-bad", 0.10, "flow-control share to call BAD")
 		istWarn     = fs.Duration("ist-warn", 30*time.Minute, "gcache window below which a restart means a full SST")
 		clockWarn   = fs.Duration("clock-warn", 2*time.Second, "spread between node clocks to WARN at")
+		latFloor    = fs.Duration("latency-floor", 2*time.Millisecond, "replication latency below which a difference inside a segment is noise")
 		clockBad    = fs.Duration("clock-bad", 30*time.Second, "spread between node clocks to call BAD")
 		asJSON      = fs.Bool("json", false, "full JSON report")
 		asFindings  = fs.Bool("findings", false, "flat findings array")
@@ -229,6 +233,7 @@ func cmdAudit(args []string) int {
 	opt := audit.DefaultOptions()
 	opt.FlowWarn, opt.FlowBad, opt.ISTWarn = *flowWarn, *flowBad, *istWarn
 	opt.ClockWarn, opt.ClockBad = *clockWarn, *clockBad
+	opt.LatencyFloor = *latFloor
 	opt.Now = time.Now()
 
 	var reps []audit.Report

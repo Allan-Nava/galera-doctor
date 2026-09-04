@@ -6,14 +6,14 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**46 items · 39 shipped · 7 open · 6 milestones.**
+**46 items · 40 shipped · 6 open · 6 milestones.**
 
 ## At a glance
 
 | Milestone | Target | Phase | Progress | Open | Shipped |
 |---|---|---|---|---|---|
 | **M1** — See what the metrics cannot | `v0.1.0` | shipped | `##########` 100% | 0 | 12 |
-| **M2** — Deeper into the cluster | `v0.2.0` | **now** | `###.......` 33% | 4 | 2 |
+| **M2** — Deeper into the cluster | `v0.2.0` | **now** | `#####.....` 50% | 3 | 3 |
 | **M3** — Fit the toolchain | `v0.3.0` | next | `######....` 57% | 3 | 4 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `##########` 100% | 0 | 7 |
@@ -26,7 +26,6 @@ The open items with the highest priority in the milestones that are in flight.
 - **GD-14** — Backup freshness · `high` · size `M` · check (M2, target `v0.2.0`)
 - **GD-19** — checkfleet module · `high` · size `M` · integration (M3, target `v0.3.0`)
 - **GD-15** — SST/IST history · `med` · size `L` · check (M2, target `v0.2.0`)
-- **GD-17** — Cross-DC latency from the cluster's own numbers · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-21** — Docs site · `med` · size `M` · docs (M3, target `v0.3.0`)
 - **GD-18** — Watch mode · `low` · size `M` · cli (M2, target `v0.2.0`)
 - **GD-22** — Percona XtraDB Cluster and MySQL Group Replication · `low` · size `XL` · check (M3, target `v0.3.0`)
@@ -54,16 +53,16 @@ Target `v0.1.0` · shipped · 0 open · 12 shipped · `##########` 100%
 
 ### M2 — Deeper into the cluster
 
-Target `v0.2.0` · **now** · 4 open · 2 shipped · `###.......` 33%
+Target `v0.2.0` · **now** · 3 open · 3 shipped · `#####.....` 50%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
 | **GD-14** — Backup freshness | high | M | check | open |
 | **GD-15** — SST/IST history | med | L | check | open |
-| **GD-17** — Cross-DC latency from the cluster's own numbers | med | L | check | open |
 | **GD-18** — Watch mode | low | M | cli | open |
 | **GD-13** — Application schema drift | high | M | check | shipped `0.2.0` |
 | **GD-16** — Node clock skew | med | S | check | shipped `0.5.0` |
+| **GD-17** — Cross-DC latency from the cluster's own numbers | med | L | check | shipped `0.8.0` |
 
 ### M3 — Fit the toolchain
 
@@ -125,7 +124,7 @@ Target `v0.6.0` · shipped · 0 open · 6 shipped · `##########` 100%
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 27 | 4 |
+| `check` | 27 | 3 |
 | `cli` | 2 | 1 |
 | `docs` | 4 | 1 |
 | `integration` | 1 | 1 |
