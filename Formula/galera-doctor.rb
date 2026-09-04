@@ -2,28 +2,28 @@
 class GaleraDoctor < Formula
   desc "Read-only audit of a Galera cluster: the states its own metrics cannot show"
   homepage "https://github.com/Allan-Nava/galera-doctor"
-  version "0.8.0"
+  version "0.9.0"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.8.0/galera-doctor_0.8.0_darwin_arm64.tar.gz"
-      sha256 "9e8f259e377d5f903f8b0a29cc73725ad80436e95b37de9835550903ecac4616"
+      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.9.0/galera-doctor_0.9.0_darwin_arm64.tar.gz"
+      sha256 "76204e2facee4379f5a68de1250a34b727a281dc72bb7ee2a163fc518fb671aa"
     end
     on_intel do
-      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.8.0/galera-doctor_0.8.0_darwin_amd64.tar.gz"
-      sha256 "099c48922b74c66cbeceabd1563f1ca7c0021169b6e8df38e07bf94ce2fcb8e3"
+      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.9.0/galera-doctor_0.9.0_darwin_amd64.tar.gz"
+      sha256 "1c8c45cf40c98f65666184dd8c05d9d474025faaf46f0cb73dc0c155544a9724"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.8.0/galera-doctor_0.8.0_linux_arm64.tar.gz"
-      sha256 "6c31730fcb805a2d59d3b104dcb592868904723acfb7b3d00c191b80d8ce60ed"
+      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.9.0/galera-doctor_0.9.0_linux_arm64.tar.gz"
+      sha256 "e1f3681c8f47b1c35ce48000e4ad90d1becda81ce759de857b0d352e4ab96f11"
     end
     on_intel do
-      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.8.0/galera-doctor_0.8.0_linux_amd64.tar.gz"
-      sha256 "0995164932b18a00b8ebbec32c304db2861fbca8a28dc6b87f855111caf57621"
+      url "https://github.com/Allan-Nava/galera-doctor/releases/download/v0.9.0/galera-doctor_0.9.0_linux_amd64.tar.gz"
+      sha256 "acd34c8d6095e389ec5a996d693649eba29845302ade647c918d42e5a9293eb1"
     end
   end
 
