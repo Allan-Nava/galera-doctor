@@ -51,7 +51,7 @@ jobs:
 
       # What was built, signed by the workflow that built it. `gh attestation
       # verify` checks a downloaded archive against this.
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.tar.gz
 
@@ -138,7 +138,7 @@ jobs:
             ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
             ${{ steps.v.outputs.image }}:latest
 
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ steps.v.outputs.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
