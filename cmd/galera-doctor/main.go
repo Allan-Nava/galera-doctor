@@ -125,6 +125,7 @@ func cmdChecks() int {
 		{"repl/appliers", "a node that applies with fewer threads than its peers"},
 		{"sst/size", "what a rejoin copies, and how long a donor is out of service"},
 		{"audit/coverage", "what this run could not audit, in one line"},
+		{"audit/changes", "what appeared, cleared or got worse since the last run (needs --state)"},
 		{"proxysql/*", "the proxy's view against the cluster's (needs --proxysql)"},
 		{"proxysql/monitor", "a proxy whose Galera monitor stopped: the hostgroups are a photograph"},
 	}
@@ -241,7 +242,9 @@ func cmdAudit(args []string) int {
 		if *expect != 0 {
 			o.ExpectNodes = *expect
 		}
-		rep := audit.Run(snaps, prev, o)
+		// The state file namespaces everything by cluster; the audit asks
+		// about bare node names, so it gets this cluster's view of it.
+		rep := audit.Run(snaps, prev.Scope(name), o)
 		dsn := c.ProxySQLDSN
 		if *proxyDSN != "" {
 			dsn = *proxyDSN
@@ -250,9 +253,7 @@ func cmdAudit(args []string) int {
 			rep.Findings = append(rep.Findings, proxysql.Audit(proxysql.Collect(ctx, dsn, *timeout), snaps)...)
 			finding.SortWorstFirst(rep.Findings)
 		}
-		for node, ns := range rep.State.Nodes {
-			merged.Nodes[name+"/"+node] = ns
-		}
+		merged.Merge(name, rep.State)
 		reps = append(reps, rep)
 	}
 

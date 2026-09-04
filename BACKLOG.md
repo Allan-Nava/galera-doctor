@@ -207,11 +207,17 @@ asked to behave as one thing.
   segments, or three datacentres all in segment 0, is a WAN bill and a slow
   cluster that replicates perfectly. Complements GD-17, which measures the
   latency rather than the intent. <!-- gd: prio=med size=M labels=check ver=0.5.0 -->
-- [ ] **GD-32 — What changed since the last run**: the state file already holds
+- [x] **GD-32 — What changed since the last run**: the state file already holds
   the previous run's findings; print the transitions — appeared, cleared, got
   worse — for the person who ran the audit twenty minutes ago and needs to know
   whether the thing they did helped. Not a history, and not a daemon: one diff
-  against one file. <!-- gd: prio=med size=M labels=output -->
+  against one file. <!-- gd: prio=med size=M labels=output ver=0.7.0 -->
+- [x] **GD-46 — The baseline that was never found**: the state file namespaces
+  nodes by cluster (`compress/sg-01`) and the audit asks about bare node names,
+  so every lookup missed and every counter check reported *not graded: no
+  baseline* forever — indistinguishable from a cluster with nothing to grade.
+  `State.Scope` and `State.Merge` are now the two sides of that boundary, with
+  tests on both. <!-- gd: prio=high size=S labels=collect,tests ver=0.7.0 -->
 - [x] **GD-33 — A restart that throws the gcache away**: `gcache.recover` per
   node. With it off, a clean restart loses the write-set cache and the node
   needs a full SST for a two-minute maintenance window — the gcache window

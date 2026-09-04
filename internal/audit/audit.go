@@ -93,6 +93,18 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 
 	add := func(fs ...finding.Finding) { rep.Findings = append(rep.Findings, fs...) }
 
+	// Every return path ends the same way: the transitions since the previous
+	// run, then this run's verdicts carried forward for the next one. A
+	// cluster that could not be read at all is a run whose findings still have
+	// to be comparable — otherwise "the node came back" is a transition nobody
+	// reports.
+	finish := func() Report {
+		add(changes(rep.Cluster, rep.Findings, prev, opt.Now)...)
+		rep.State.Findings = carry(rep.Findings)
+		finding.SortWorstFirst(rep.Findings)
+		return rep
+	}
+
 	add(nodesRead(snaps)...)
 	live := readable(snaps)
 	if len(live) == 0 {
@@ -101,8 +113,7 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 			Message: "no node could be read",
 			Hint:    "nothing below this line was audited — fix access first",
 		})
-		finding.SortWorstFirst(rep.Findings)
-		return rep
+		return finish()
 	}
 
 	// A server without the wsrep provider is not a cluster member having a bad
@@ -119,8 +130,7 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 			Message: "no node in this list is running Galera",
 			Hint:    "nothing was audited as a cluster — check the DSNs, or use a tool for standalone servers",
 		})
-		finding.SortWorstFirst(rep.Findings)
-		return rep
+		return finish()
 	}
 
 	add(clusterIdentity(rep.Cluster, live)...)
@@ -151,8 +161,7 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(versions(rep.Cluster, live)...)
 	add(gcache(live, prev, rep.State, opt)...)
 
-	finding.SortWorstFirst(rep.Findings)
-	return rep
+	return finish()
 }
 
 // splitGalera separates cluster members from standalone servers.
@@ -1682,6 +1691,106 @@ func humanBytes(n int64) string {
 		f /= unit
 	}
 	return fmt.Sprintf("%d B", n)
+}
+
+// changes says what moved since the previous run (GD-32).
+//
+// The person reading this ran the audit twenty minutes ago and did something in
+// between. What they need is not the same list again: it is which findings
+// appeared, which cleared, and which got worse. Only the statuses are compared
+// — the messages carry measurements, and comparing prose would report a change
+// every time a percentage moved by 0.1.
+//
+// The summary is OK whatever it contains: the findings it describes are in the
+// same report with their own severities, and counting them twice would make one
+// incident look like two.
+func changes(name string, current []finding.Finding, prev *state.State, now time.Time) []finding.Finding {
+	if prev == nil || prev.Version != state.Version || len(prev.Findings) == 0 {
+		return nil
+	}
+
+	// The summary is never part of what it compares: a run that stored its own
+	// transition line would report itself as a change forever.
+	nowMap := carry(current)
+
+	var appeared, cleared, worse, better []string
+	for key, status := range nowMap {
+		before, seen := prev.Findings[key]
+		switch {
+		case !seen && status != string(finding.OK):
+			appeared = append(appeared, fmt.Sprintf("%s (%s)", key, status))
+		case seen && before != status:
+			if finding.Severity(finding.Status(status)) > finding.Severity(finding.Status(before)) {
+				worse = append(worse, fmt.Sprintf("%s (%s → %s)", key, before, status))
+			} else if status == string(finding.OK) {
+				cleared = append(cleared, key)
+			} else {
+				better = append(better, fmt.Sprintf("%s (%s → %s)", key, before, status))
+			}
+		}
+	}
+	// A finding that is gone entirely cleared too: the check may not even have
+	// run this time, and saying so is better than silence.
+	for key, before := range prev.Findings {
+		if _, still := nowMap[key]; !still && before != string(finding.OK) {
+			cleared = append(cleared, key+" (no longer reported)")
+		}
+	}
+	sort.Strings(appeared)
+	sort.Strings(cleared)
+	sort.Strings(worse)
+	sort.Strings(better)
+
+	interval := now.Sub(prev.At).Round(time.Second)
+	var parts []string
+	for _, group := range []struct {
+		label string
+		items []string
+	}{
+		{"got worse", worse},
+		{"appeared", appeared},
+		{"cleared", cleared},
+		{"improved", better},
+	} {
+		if len(group.items) == 0 {
+			continue
+		}
+		shown := group.items
+		suffix := ""
+		if len(shown) > 4 {
+			shown, suffix = shown[:4], fmt.Sprintf(" (+%d more)", len(group.items)-4)
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s%s", group.label, strings.Join(shown, ", "), suffix))
+	}
+
+	if len(parts) == 0 {
+		return []finding.Finding{{
+			Check: "audit/changes", Target: name, Status: finding.OK,
+			Message: fmt.Sprintf("nothing changed since the previous run (%s ago)", interval),
+			Value:   finding.Num(0), Unit: "changes",
+		}}
+	}
+	total := len(appeared) + len(cleared) + len(worse) + len(better)
+	return []finding.Finding{{
+		Check: "audit/changes", Target: name, Status: finding.OK,
+		Message: fmt.Sprintf("since the previous run (%s ago) — %s", interval, strings.Join(parts, "; ")),
+		Value:   finding.Num(float64(total)), Unit: "changes",
+		Hint: "the transitions, not the verdicts: each of these is reported with its own severity elsewhere in this report, and \"got worse\" is where to start",
+	}}
+}
+
+// carry is the findings of this run in the shape the next one compares
+// against: the status per check and target, and never the transition summary
+// itself — a run that stored that would report itself as a change forever.
+func carry(fs []finding.Finding) map[string]string {
+	out := make(map[string]string, len(fs))
+	for _, f := range fs {
+		if f.Check == "audit/changes" {
+			continue
+		}
+		out[state.Key(f.Check, f.Target)] = string(f.Status)
+	}
+	return out
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.

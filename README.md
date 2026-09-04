@@ -103,6 +103,7 @@ flow/settings                              one node's flow-control limit pacing 
 repl/appliers                              a node that applies with fewer threads than its peers
 sst/size                                   what a rejoin copies, and how long a donor is out of service
 audit/coverage                             what this run could not audit, in one line
+audit/changes                              what appeared, cleared or got worse since the last run (needs --state)
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
 proxysql/monitor                           a proxy whose Galera monitor stopped: the hostgroups are a photograph
 ```
@@ -131,6 +132,13 @@ judge it:
 A counter that went backwards, a node whose uptime shrank, a state file from
 another format version: all of them mean *no baseline*, never a negative rate
 and never a spectacular one.
+
+The same file carries the previous run's verdicts, so a second run says what
+moved rather than repeating itself:
+
+```console
+  OK    audit/changes   compress   since the previous run (17m0s ago) — cleared: systables/drift@mysql.column_stats; appeared: flow/paused@sg-01 (WARN)
+```
 
 ## Configuration
 

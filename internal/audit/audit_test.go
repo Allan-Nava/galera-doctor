@@ -1428,3 +1428,128 @@ func TestCoverageWithABaselineDoesNotMentionIt(t *testing.T) {
 		t.Fatalf("there is a baseline: %q", f.Message)
 	}
 }
+
+// GD-32 — what changed since the last run.
+//
+// The person reading this ran the audit twenty minutes ago and did something
+// in between. The one thing they need is not the list of findings again: it is
+// which of them appeared, which cleared, and which got worse.
+func TestNoBaselineMeansNoChangeReport(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "audit/changes"); len(fs) != 0 {
+		t.Fatalf("without a previous run there are no transitions to report: %+v", fs)
+	}
+}
+
+func TestAClearedFindingIsReported(t *testing.T) {
+	snaps := threeHealthy()
+	prev := state.New(snaps, now.Add(-20*time.Minute))
+	prev.Findings = map[string]string{"systables/drift@mysql.column_stats": "BAD"}
+
+	rep := Run(snaps, &prev, opts())
+	f := one(t, rep, "audit/changes")
+	if f.Status != finding.OK {
+		t.Fatalf("a transition summary does not add severity of its own: %+v", f)
+	}
+	if !strings.Contains(f.Message, "cleared") || !strings.Contains(f.Message, "systables/drift") {
+		t.Fatalf("the message must say what cleared: %q", f.Message)
+	}
+}
+
+func TestANewFindingIsReportedAsAppeared(t *testing.T) {
+	snaps := threeHealthy()
+	prev := state.New(snaps, now.Add(-20*time.Minute))
+	prev.Findings = map[string]string{"cluster/size@compress": "OK"}
+	snaps[1].SysTables["column_stats"] = "cccccccccccccccc"
+
+	rep := Run(snaps, &prev, opts())
+	f := one(t, rep, "audit/changes")
+	if !strings.Contains(f.Message, "appeared") || !strings.Contains(f.Message, "systables/drift") {
+		t.Fatalf("the message must say what appeared: %q", f.Message)
+	}
+}
+
+func TestAWorseFindingIsReportedAsWorse(t *testing.T) {
+	snaps := threeHealthy()
+	prev := state.New(snaps, now.Add(-20*time.Minute))
+	prev.Findings = map[string]string{"cluster/primary@cl-02": "WARN"}
+	snaps[1].Status["wsrep_cluster_status"] = "non-Primary"
+
+	rep := Run(snaps, &prev, opts())
+	f := one(t, rep, "audit/changes")
+	if !strings.Contains(f.Message, "worse") || !strings.Contains(f.Message, "cluster/primary") {
+		t.Fatalf("the message must say what got worse, and from what: %q", f.Message)
+	}
+	if !strings.Contains(f.Message, "WARN") || !strings.Contains(f.Message, "BAD") {
+		t.Fatalf("both statuses belong in the line: %q", f.Message)
+	}
+}
+
+// A run that changed nothing is worth one line saying so: that is the answer a
+// cron job and an incident channel are both waiting for.
+func TestNothingChangedIsSaidOutLoud(t *testing.T) {
+	snaps := threeHealthy()
+	first := Run(snaps, nil, opts())
+	prev := first.State
+	prev.At = now.Add(-20 * time.Minute)
+
+	rep := Run(snaps, &prev, opts())
+	f := one(t, rep, "audit/changes")
+	if f.Status != finding.OK || !strings.Contains(f.Message, "nothing changed") {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Message, "20m") {
+		t.Fatalf("the interval is the point of the line: %q", f.Message)
+	}
+}
+
+// The transition summary must not be part of what it compares, or every run
+// after the first reports itself as a change.
+func TestTheChangeReportIsNotItsOwnFinding(t *testing.T) {
+	snaps := threeHealthy()
+	first := Run(snaps, nil, opts())
+	for key := range first.State.Findings {
+		if strings.HasPrefix(key, "audit/changes@") {
+			t.Fatalf("the change report stored itself: %+v", first.State.Findings)
+		}
+	}
+	second := Run(snaps, &first.State, opts())
+	f := one(t, second, "audit/changes")
+	if !strings.Contains(f.Message, "nothing changed") {
+		t.Fatalf("a second identical run has nothing to report: %q", f.Message)
+	}
+}
+
+// The findings of the run are what the next run compares against, so they have
+// to be in the state the report carries.
+func TestTheReportCarriesItsFindingsForwards(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if len(rep.State.Findings) == 0 {
+		t.Fatal("the state to persist carries no findings: the next run would have no baseline")
+	}
+	if got, ok := rep.State.Findings["cluster/size@compress"]; !ok || got != "OK" {
+		t.Fatalf("cluster/size is missing or wrong in the carried state: %q %v", got, ok)
+	}
+}
+
+// A run that could not audit anything still has to be comparable, or "the node
+// came back" is a transition nobody reports.
+func TestAnUnreadableClusterStillCarriesItsFindingsForwards(t *testing.T) {
+	snaps := []cluster.Snapshot{{Node: "sg-01", At: now, Err: "dial tcp: i/o timeout"}}
+	rep := Run(snaps, nil, opts())
+	if len(rep.State.Findings) == 0 {
+		t.Fatalf("nothing was carried forward: %+v", rep.Findings)
+	}
+	if rep.State.Findings["cluster/membership@compress"] != "ERROR" {
+		t.Fatalf("the membership ERROR must be in the carried state: %+v", rep.State.Findings)
+	}
+
+	// And the next run, with the node back, reports the transition.
+	prev := rep.State
+	prev.At = now.Add(-10 * time.Minute)
+	back := Run(threeHealthy(), &prev, opts())
+	f := one(t, back, "audit/changes")
+	if !strings.Contains(f.Message, "cleared") || !strings.Contains(f.Message, "cluster/membership") {
+		t.Fatalf("a cluster that came back is the clearest transition there is: %q", f.Message)
+	}
+}

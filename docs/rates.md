@@ -52,3 +52,17 @@ All of these mean *no baseline*, and none of them produce a number:
 
 The state file is a cache, never a source of truth. Delete it and the next run
 simply has nothing to compare against — it says so.
+
+## What else the file carries
+
+Format **2** added the previous run's verdicts — one status per `check@target`,
+never the messages — which is what [`audit/changes`](checks.md#auditchanges)
+compares. A file from format 1 is ignored rather than migrated: read as "that
+run found nothing", it would report every current finding as newly appeared.
+One ungraded run is the worst outcome of a stale cache, and that is the deal.
+
+One file can cover a whole `--config`, so everything in it is namespaced by
+cluster (`compress/sg-01`) and the audit is handed one cluster's view of it.
+That indirection is load-bearing: without it the lookup misses on every run and
+every counter check reports *not graded: no baseline* forever — which looks
+exactly like a cluster with nothing to grade.

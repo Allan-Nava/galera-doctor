@@ -192,6 +192,22 @@ takes out of service for the duration. A size is a number rather than a fault,
 so this is `OK`; [`gcache/window`](#gcachewindow) is the check that grades
 whether an SST is likely at all.
 
+### `audit/changes`
+
+What moved since the previous run: appeared, cleared, got worse, improved.
+Needs `--state`, because the answer lives in the state file — which carries the
+previous run's verdicts alongside its counters.
+
+The person reading this ran the audit twenty minutes ago and did something in
+between; what they need is not the same list again. Only the **statuses** are
+compared, never the messages: a message carries a measurement, and comparing
+prose would report a change every time a percentage moved by 0.1. The summary
+is always `OK` — every finding it mentions is in the same report with its own
+severity, and counting them twice makes one incident look like two.
+
+A cluster that could not be read at all still carries its findings forward, so
+"the node came back" is a transition rather than a silence.
+
 ### `audit/coverage`
 
 One line saying what this run could **not** audit: a node that could not be

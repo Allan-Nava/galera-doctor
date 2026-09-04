@@ -27,7 +27,12 @@ import (
 
 // Version is the on-disk format. A file from another version is ignored rather
 // than migrated: the worst outcome of a stale cache is one ungraded run.
-const Version = 1
+//
+// 2 added the previous run's findings alongside its counters (GD-32). A v1
+// file has no findings in it, and reading one as "this run had none" would
+// report every current finding as newly appeared — which is why the version
+// moves with the format instead of the field being treated as optional.
+const Version = 2
 
 // Counters are the status variables carried between runs. They are all
 // monotonic totals, which is precisely why they are here.
@@ -52,6 +57,12 @@ type State struct {
 	Version int                  `json:"version"`
 	At      time.Time            `json:"at"`
 	Nodes   map[string]NodeState `json:"nodes"`
+	// Findings is the previous run's verdicts, keyed "check@target", so the
+	// next run can say what appeared, what cleared and what got worse. Only
+	// the status is kept: the message is prose that changes with the
+	// measurement, and comparing prose would report a change every time a
+	// percentage moved (GD-32).
+	Findings map[string]string `json:"findings,omitempty"`
 }
 
 // New builds the state to persist from a set of snapshots.
@@ -77,6 +88,73 @@ func New(snaps []cluster.Snapshot, now time.Time) State {
 	}
 	return st
 }
+
+// Merge folds one cluster's state into a file that can hold several: one
+// --state file is allowed to cover a whole --config, so everything in it is
+// namespaced by cluster name.
+func (s *State) Merge(cluster string, from State) {
+	if s.Nodes == nil {
+		s.Nodes = map[string]NodeState{}
+	}
+	for node, ns := range from.Nodes {
+		s.Nodes[cluster+"/"+node] = ns
+	}
+	if len(from.Findings) == 0 {
+		return
+	}
+	if s.Findings == nil {
+		s.Findings = map[string]string{}
+	}
+	for k, v := range from.Findings {
+		s.Findings[cluster+"/"+k] = v
+	}
+}
+
+// Scope is the view of one cluster, keyed the way the audit asks for it (GD-46).
+//
+// The file namespaces everything by cluster; Since() and the transition report
+// both ask about a bare node name and a bare "check@target". Without this in
+// between, every lookup misses and every counter check reports "not graded: no
+// baseline" forever — which is indistinguishable from a cluster that has
+// nothing to grade, and is exactly the silence this tool exists to refuse.
+//
+// A cluster that is not in the file yet scopes to an empty baseline rather
+// than to another cluster's.
+func (s *State) Scope(cluster string) *State {
+	if s == nil {
+		return nil
+	}
+	out := &State{
+		Version:  s.Version,
+		At:       s.At,
+		Nodes:    map[string]NodeState{},
+		Findings: map[string]string{},
+	}
+	prefix := cluster + "/"
+	for k, ns := range s.Nodes {
+		if node, ok := trimPrefix(k, prefix); ok {
+			out.Nodes[node] = ns
+		}
+	}
+	for k, v := range s.Findings {
+		if key, ok := trimPrefix(k, prefix); ok {
+			out.Findings[key] = v
+		}
+	}
+	return out
+}
+
+func trimPrefix(s, prefix string) (string, bool) {
+	if len(s) > len(prefix) && s[:len(prefix)] == prefix {
+		return s[len(prefix):], true
+	}
+	return "", false
+}
+
+// Key is how a finding is identified between runs: the check and what it was
+// about. Not the message — that is prose carrying a measurement, and comparing
+// it would report a change every time a percentage moved by 0.1.
+func Key(check, target string) string { return check + "@" + target }
 
 // Delta is a counter's movement between two runs.
 type Delta struct {

@@ -6,6 +6,41 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.7.0] - 2026-09-03
+
+### Added
+
+- **`audit/changes`** (GD-32) — what moved since the previous run: appeared,
+  cleared, got worse, improved. The state file now carries the previous run's
+  verdicts alongside its counters, so a second run says what changed instead of
+  repeating itself. Only the statuses are compared, never the messages — a
+  message carries a measurement, and comparing prose would report a change
+  every time a percentage moved by 0.1. The summary is always `OK`: every
+  finding it mentions is in the same report with its own severity, and counting
+  them twice makes one incident look like two. A cluster that could not be read
+  at all still carries its findings forward, so "the node came back" is a
+  transition rather than a silence.
+
+  The on-disk format is **2**. A format 1 file is ignored rather than migrated,
+  as before: read as "that run found nothing", it would report every current
+  finding as newly appeared.
+
+### Fixed
+
+- **The baseline that was never found** (GD-46) — the state file namespaces
+  nodes by cluster, because one `--state` file may cover a whole `--config`, and
+  the audit asks `Since()` about a bare node name. Nothing sat in between: the
+  CLI wrote `compress/sg-01`, the audit looked up `sg-01`, the lookup missed on
+  every run, and every counter check reported *not graded: no baseline* forever.
+  It was invisible precisely because the fallback is honest — "no baseline" is a
+  legitimate state, and a check that never grades looks exactly like a cluster
+  with nothing to grade.
+
+  `State.Scope` and `State.Merge` are now the two sides of that boundary, each
+  with tests: what lands on disk is namespaced, what the audit gets is one
+  cluster's view keyed the way it asks, and a cluster that is not in the file
+  yet gets an empty baseline rather than another cluster's.
+
 ## [0.6.0] - 2026-09-03
 
 M6 — configured, and not running. Everything before this compares the nodes

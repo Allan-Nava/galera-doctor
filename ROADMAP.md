@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**45 items · 37 shipped · 8 open · 6 milestones.**
+**46 items · 39 shipped · 7 open · 6 milestones.**
 
 ## At a glance
 
@@ -16,7 +16,7 @@
 | **M2** — Deeper into the cluster | `v0.2.0` | **now** | `###.......` 33% | 4 | 2 |
 | **M3** — Fit the toolchain | `v0.3.0` | next | `######....` 57% | 3 | 4 |
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
-| **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `########..` 83% | 1 | 5 |
+| **M5** — The cluster you cannot see from one node | `v0.3.0` | next | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
 
 ## Next up
@@ -28,7 +28,6 @@ The open items with the highest priority in the milestones that are in flight.
 - **GD-15** — SST/IST history · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-17** — Cross-DC latency from the cluster's own numbers · `med` · size `L` · check (M2, target `v0.2.0`)
 - **GD-21** — Docs site · `med` · size `M` · docs (M3, target `v0.3.0`)
-- **GD-32** — What changed since the last run · `med` · size `M` · output (M5, target `v0.3.0`)
 - **GD-18** — Watch mode · `low` · size `M` · cli (M2, target `v0.2.0`)
 - **GD-22** — Percona XtraDB Cluster and MySQL Group Replication · `low` · size `XL` · check (M3, target `v0.3.0`)
 
@@ -97,15 +96,16 @@ Target `v0.2.0` · shipped · 0 open · 8 shipped · `##########` 100%
 
 ### M5 — The cluster you cannot see from one node
 
-Target `v0.3.0` · next · 1 open · 5 shipped · `########..` 83%
+Target `v0.3.0` · next · 0 open · 7 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-32** — What changed since the last run | med | M | output | open |
 | **GD-33** — A restart that throws the gcache away | high | S | check | shipped `0.4.0` |
 | **GD-34** — The DDL method that explains GD-13 | high | S | check | shipped `0.4.0` |
+| **GD-46** — The baseline that was never found | high | S | collect,tests | shipped `0.7.0` |
 | **GD-30** — Write-set limits that disagree | med | S | check | shipped `0.5.0` |
 | **GD-31** — The segment map against the topology | med | M | check | shipped `0.5.0` |
+| **GD-32** — What changed since the last run | med | M | output | shipped `0.7.0` |
 | **GD-35** — Durability that is not the cluster's | med | S | check | shipped `0.5.0` |
 
 ### M6 — Configured, and not running
@@ -129,10 +129,10 @@ Target `v0.6.0` · shipped · 0 open · 6 shipped · `##########` 100%
 | `cli` | 2 | 1 |
 | `docs` | 4 | 1 |
 | `integration` | 1 | 1 |
-| `output` | 3 | 1 |
-| `collect` | 1 | 0 |
+| `collect` | 2 | 0 |
 | `delivery` | 1 | 0 |
+| `output` | 3 | 0 |
 | `project` | 3 | 0 |
 | `proxysql` | 2 | 0 |
 | `release` | 2 | 0 |
-| `tests` | 4 | 0 |
+| `tests` | 5 | 0 |
