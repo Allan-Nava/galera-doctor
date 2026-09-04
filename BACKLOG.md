@@ -319,23 +319,23 @@ and not on its peers, and somebody believes writes only go to one member. None
 of it appears in a cluster diagram and none of it appears in `wsrep_*` — the
 cluster cannot see a write path it is not part of.
 
-- [ ] **GD-47 — Async replication attached to the cluster**: `SHOW REPLICA
+- [x] **GD-47 — Async replication attached to the cluster**: `SHOW REPLICA
   STATUS` per node, and whether any node is a source for something outside.
   A member that is also an async replica is a second write path into the
   cluster; a member that feeds a downstream replica is a dependency nobody
   else in the cluster knows about, and the next SST rebuilds its binlogs out
-  from under it. <!-- gd: prio=high size=M labels=collect,check -->
-- [ ] **GD-48 — GTID domains that do not agree**: `gtid_domain_id`,
+  from under it. <!-- gd: prio=high size=M labels=collect,check ver=0.11.0 -->
+- [x] **GD-48 — GTID domains that do not agree**: `gtid_domain_id`,
   `server_id` and `gtid_strict_mode` across nodes. When anything replicates out
   of a Galera cluster, the nodes have to agree about the domain or a failover
   silently rewrites history for every downstream replica — and nothing in the
   cluster is affected, which is why nothing reports it.
-  <!-- gd: prio=high size=S labels=check -->
-- [ ] **GD-50 — Triggers that run on one node only**:
+  <!-- gd: prio=high size=S labels=check ver=0.11.0 -->
+- [x] **GD-50 — Triggers that run on one node only**:
   `wsrep_slave_run_triggers` per node. A trigger that fires on the writer and
   not on the appliers writes rows on one node and not the others — divergence
   produced by design, certified by nothing, invisible to every counter.
-  <!-- gd: prio=high size=S labels=check -->
+  <!-- gd: prio=high size=S labels=check ver=0.11.0 -->
 - [ ] **GD-49 — Who is actually writing**: `wsrep_replicated` per node over the
   interval (needs `--state`). "We only write to one node" is a belief, and the
   cluster has the numbers to confirm or refute it — a second writer nobody

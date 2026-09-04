@@ -96,6 +96,21 @@ func TestCollectAgainstARealServer(t *testing.T) {
 		t.Fatalf("a negative dataset size: %d", *snap.DataBytes)
 	}
 
+	// GD-47: the replication reads. A server with no async replication answers
+	// SHOW REPLICA STATUS with zero rows, and the difference between that and
+	// "the statement was refused" is the difference between "there is none"
+	// and "we did not look" — which a fixture cannot tell apart, and which
+	// decides whether audit/coverage reports a gap.
+	if snap.Replicas == nil {
+		t.Fatal("the replica status was not read: nil means \"not audited\" to the audit")
+	}
+	if snap.ReplicaHosts == nil {
+		t.Fatal("the downstream replicas were not read: nil means \"not audited\" to the audit")
+	}
+	if len(snap.Replicas) != 0 {
+		t.Fatalf("a throwaway server should have no sources: %+v", snap.Replicas)
+	}
+
 	// The primary key query must not report the server's own tables.
 	for _, table := range snap.TablesNoPK {
 		for _, schema := range SystemSchemas {
@@ -106,5 +121,6 @@ func TestCollectAgainstARealServer(t *testing.T) {
 	}
 	t.Logf("read %d status, %d variables, %d system tables, %d application tables, %d without a primary key, %d not on a replicated engine",
 		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.AppTables), len(snap.TablesNoPK), len(snap.TablesNonInnoDB))
-	t.Logf("clock skew against this host: %s, dataset %d bytes", snap.Clock.Sub(snap.At), *snap.DataBytes)
+	t.Logf("clock skew against this host: %s, dataset %d bytes, %d source(s), %d downstream replica(s)",
+		snap.Clock.Sub(snap.At), *snap.DataBytes, len(snap.Replicas), len(snap.ReplicaHosts))
 }

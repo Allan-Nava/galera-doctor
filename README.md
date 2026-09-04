@@ -34,6 +34,7 @@ These are the states this tool exists for:
 | **A split brain that is already configured** | `pc.ignore_sb` left on after somebody recovered a cluster by hand, or quorum weights that are not one vote per node. Nothing is exercised until the network moves — and then both sides stay writable. |
 | **Tables Galera does not replicate at all** | A MyISAM or Aria table in an application schema. The write succeeds, nothing certifies it, no counter records it, and the rows exist on exactly one node. |
 | **Durability that is not the cluster's** | A cluster's durability is its weakest node's, not its average. One node acknowledging a commit before its log reaches the disk turns "committed on three nodes" into something else — and each node is doing exactly what it was told, so nothing reports it. |
+| **A write path nobody drew** | A cluster is drawn as three nodes replicating to each other. It does not show the member that is also an async replica of a legacy server, or the one feeding a reporting replica downstream — and the cluster cannot see a write path it is not part of. |
 | **Slow, or simply far away** | A deep send queue says nothing about the cause: a node across a WAN link is doing what physics allows, and a node with a failing disk in the same rack looks identical from there. `wsrep_evs_repl_latency` and the segment map together say which one it is. |
 | **A node that cannot find its cluster** | `wsrep_cluster_address` is only read at startup. A list naming two decommissioned servers — or an empty `gcomm://` left behind after a bootstrap — belongs to a node that is Synced and green today and forms its own cluster tomorrow. |
 | **Flow control that already happened** | `wsrep_flow_control_paused` covers the time since the last status reset, so an incident from March reads the same today. Graded as a lifetime total it goes red once and stays red. |
@@ -105,6 +106,10 @@ flow/settings                              one node's flow-control limit pacing 
 repl/appliers                              a node that applies with fewer threads than its peers
 sst/size                                   what a rejoin copies, and how long a donor is out of service
 audit/coverage                             what this run could not audit, in one line
+repl/async-in, repl/async-out              async replication into or out of a cluster member
+repl/server-id                             nodes sharing a server_id
+repl/gtid-domain, repl/gtid-strict         what a failover does to a downstream replica
+repl/triggers                              triggers that run on the appliers of one node only
 audit/changes                              what appeared, cleared or got worse since the last run (needs --state)
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
 proxysql/monitor                           a proxy whose Galera monitor stopped: the hostgroups are a photograph

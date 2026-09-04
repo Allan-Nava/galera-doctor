@@ -14,6 +14,10 @@ import (
 var now = time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 
 // healthy is one node of a cluster where nothing is wrong.
+// serverIDs are the distinct server_id values a real cluster must have: two
+// nodes sharing one is a finding, so the fixture cannot share them either.
+var serverIDs = map[string]string{"sg-01": "1", "cl-02": "2", "ov-03": "3"}
+
 func healthy(name string, at time.Time) cluster.Snapshot {
 	return cluster.Snapshot{
 		Node: name,
@@ -51,9 +55,16 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			"wsrep_sst_donor":  "",
 			"wsrep_sst_auth":   "********",
 			"wsrep_node_name":  name,
+			"server_id":        serverIDs[name],
 			// What this node is configured to believe about the cluster.
 			"wsrep_cluster_address": "gcomm://sg-01,cl-02,ov-03",
 			"wsrep_slave_threads":   "4",
+			// Everything that decides what leaves the cluster, or what a
+			// trigger does when a writeset lands.
+			"log_bin":                  "ON",
+			"gtid_domain_id":           "1",
+			"gtid_strict_mode":         "ON",
+			"wsrep_slave_run_triggers": "OFF",
 			// Limits and durability: uniform in every diagram, per node in
 			// every server.
 			"wsrep_max_ws_size":              "2147483647",
@@ -66,6 +77,10 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 		// were not", which is a different finding from "there are none".
 		// The server's own clock, read in the same snapshot.
 		Clock: at,
+		// Asked, and there is no async replication: an empty slice is a
+		// different statement from nil, which means nobody asked.
+		Replicas:     []cluster.ReplicaLink{},
+		ReplicaHosts: []string{},
 		// What a full state transfer would have to copy.
 		DataBytes: dataBytes(42 * 1024 * 1024 * 1024),
 		AppTables: map[string]string{"app.users": "1111111111111111", "app.events": "2222222222222222"},
@@ -1664,5 +1679,221 @@ func TestALatencyWithNoSamplesIsNotGraded(t *testing.T) {
 	rep := Run(snaps, nil, opts())
 	if fs := byCheck(t, rep, "cluster/latency"); len(fs) != 0 {
 		t.Fatalf("no samples means nothing was measured: %+v", fs)
+	}
+}
+
+// GD-48 — GTID domains that do not agree.
+//
+// Nothing inside the cluster is affected by any of this, which is exactly why
+// nothing reports it: it is the replicas *downstream* that discover a failover
+// rewrote their history.
+func TestDuplicateServerIDsAreBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["server_id"] = "1" // the same as sg-01
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/server-id")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "sg-01") || !strings.Contains(f.Message, "ov-03") {
+		t.Fatalf("both nodes sharing the id must be named: %q", f.Message)
+	}
+}
+
+func TestDistinctServerIDsAreQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "repl/server-id"); len(fs) != 0 {
+		t.Fatalf("distinct ids are the requirement, not a finding: %+v", fs)
+	}
+}
+
+func TestDisagreeingGTIDDomainsAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["gtid_domain_id"] = "7"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/gtid-domain")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the odd node must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "downstream") {
+		t.Fatalf("the hint has to say who finds out: %q", f.Hint)
+	}
+}
+
+// Without a binary log nothing can replicate out of the cluster, and a domain
+// id that cannot reach anybody is not a finding. This tool does not have
+// opinions about settings nothing reads.
+func TestGTIDDomainsAreNotGradedWithoutABinlog(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["log_bin"] = "OFF"
+	}
+	snaps[1].Vars["gtid_domain_id"] = "7"
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "repl/gtid-domain"); len(fs) != 0 {
+		t.Fatalf("nothing can replicate out, so nothing is affected: %+v", fs)
+	}
+	// A duplicate server_id is still wrong: it breaks the cluster's own
+	// internals, not only what leaves it.
+	snaps[2].Vars["server_id"] = "1"
+	rep = Run(snaps, nil, opts())
+	if f := byCheck(t, rep, "repl/server-id"); len(f) != 1 {
+		t.Fatalf("a duplicate server_id is wrong with or without a binlog: %+v", f)
+	}
+}
+
+func TestDisagreeingGTIDStrictModeIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["gtid_strict_mode"] = "OFF"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/gtid-strict")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "sg-01") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func TestAnUnreportedServerIDIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Vars, "server_id")
+		delete(snaps[i].Vars, "gtid_domain_id")
+	}
+	rep := Run(snaps, nil, opts())
+	for _, check := range []string{"repl/server-id", "repl/gtid-domain"} {
+		if fs := byCheck(t, rep, check); len(fs) != 0 {
+			t.Fatalf("%s graded a variable nobody reported: %+v", check, fs)
+		}
+	}
+}
+
+// GD-50 — triggers that run on one node only.
+//
+// The writer's trigger has already put its rows in the writeset. An applier
+// that runs the trigger again applies them twice; an applier that does not is
+// doing the right thing. So the nodes disagreeing is divergence produced by
+// design, and no counter has an opinion about it.
+func TestNodesDisagreeingAboutApplierTriggersIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["wsrep_slave_run_triggers"] = "ON"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/triggers")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the odd node must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "twice") {
+		t.Fatalf("the hint has to say what the applier does with the writeset: %q", f.Hint)
+	}
+}
+
+// Every node running them is a deliberate choice with a real hazard: worth
+// saying once, not worth calling an outage.
+func TestApplierTriggersEverywhereWarns(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Vars["wsrep_slave_run_triggers"] = "ON"
+	}
+	f := one(t, Run(snaps, nil, opts()), "repl/triggers")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+}
+
+func TestApplierTriggersOffEverywhereIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "repl/triggers"); len(fs) != 0 {
+		t.Fatalf("off everywhere is the default and the right answer: %+v", fs)
+	}
+}
+
+// GD-47 — async replication attached to the cluster.
+//
+// A cluster diagram shows three nodes replicating to each other. It does not
+// show the node that is also an async replica of something else, or the one
+// feeding a reporting replica downstream — and the cluster cannot see a write
+// path it is not part of.
+func TestANodeThatIsAlsoAnAsyncReplicaIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Replicas = []cluster.ReplicaLink{{Source: "legacy-01", IORunning: true, SQLRunning: true}}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/async-in")
+	if f.Status != finding.WARN || f.Target != "cl-02" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Message, "legacy-01") {
+		t.Fatalf("the source must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "write path") {
+		t.Fatalf("the hint has to say what it is: %q", f.Hint)
+	}
+}
+
+// A configured link that is not running is worse than one that is: somebody
+// believes those writes are arriving.
+func TestAStoppedAsyncLinkIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Replicas = []cluster.ReplicaLink{{Source: "legacy-01", IORunning: false, SQLRunning: true, LastError: "Could not connect"}}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/async-in")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "not running") {
+		t.Fatalf("the message must say the link is down: %q", f.Message)
+	}
+	// The server's own error belongs in the finding; it is the one thing that
+	// says why.
+	if !strings.Contains(f.Message, "Could not connect") && !strings.Contains(f.Hint, "Could not connect") {
+		t.Fatalf("the server's error was dropped: %+v", f)
+	}
+}
+
+// A member feeding a downstream replica is a dependency nobody else in the
+// cluster knows about — and the next SST rebuilds its binlogs out from under it.
+func TestANodeFeedingADownstreamReplicaIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].ReplicaHosts = []string{"reporting-01", "reporting-02"}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "repl/async-out")
+	if f.Status != finding.WARN || f.Target != "ov-03" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Message, "2") {
+		t.Fatalf("the message must carry how many: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "SST") {
+		t.Fatalf("the hint has to say what a state transfer does to them: %q", f.Hint)
+	}
+}
+
+func TestAClusterWithNoAsyncReplicationIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	for _, check := range []string{"repl/async-in", "repl/async-out"} {
+		if fs := byCheck(t, rep, check); len(fs) != 0 {
+			t.Fatalf("%s fired on a cluster with no async replication: %+v", check, fs)
+		}
+	}
+}
+
+// A node that could not be asked is not a node with no replication: nil means
+// not read, and the coverage line is where that is said.
+func TestAnUnreadReplicaStatusIsNotGraded(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Replicas = nil
+		snaps[i].ReplicaHosts = nil
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "repl/async-in"); len(fs) != 0 {
+		t.Fatalf("nil must not be read as a running link: %+v", fs)
+	}
+	f := one(t, rep, "audit/coverage")
+	if !strings.Contains(f.Message, "replication status") {
+		t.Fatalf("coverage has to say the replication status was not read: %q", f.Message)
 	}
 }

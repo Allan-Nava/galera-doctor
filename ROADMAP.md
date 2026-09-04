@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**56 items · 44 shipped · 12 open · 7 milestones.**
+**56 items · 47 shipped · 9 open · 7 milestones.**
 
 ## At a glance
 
@@ -18,15 +18,12 @@
 | **M4** — What the next restart costs | `v0.2.0` | shipped | `##########` 100% | 0 | 8 |
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | shipped | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
-| **M7** — Every write path, drawn or not | `v1.0.0` | next | `..........` 0% | 7 | 0 |
+| **M7** — Every write path, drawn or not | `v1.0.0` | next | `####......` 43% | 4 | 3 |
 
 ## Next up
 
 The open items with the highest priority in the milestones that are in flight.
 
-- **GD-47** — Async replication attached to the cluster · `high` · size `M` · collect,check (M7, target `v1.0.0`)
-- **GD-48** — GTID domains that do not agree · `high` · size `S` · check (M7, target `v1.0.0`)
-- **GD-50** — Triggers that run on one node only · `high` · size `S` · check (M7, target `v1.0.0`)
 - **GD-49** — Who is actually writing · `med` · size `M` · check (M7, target `v1.0.0`)
 - **GD-51** — The binary log, per node · `med` · size `S` · check (M7, target `v1.0.0`)
 - **GD-52** — A node that restarted between runs · `med` · size `S` · check (M7, target `v1.0.0`)
@@ -127,25 +124,25 @@ Target `v0.6.0` · shipped · 0 open · 6 shipped · `##########` 100%
 
 ### M7 — Every write path, drawn or not
 
-Target `v1.0.0` · next · 7 open · 0 shipped · `..........` 0%
+Target `v1.0.0` · next · 4 open · 3 shipped · `####......` 43%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-47** — Async replication attached to the cluster | high | M | collect,check | open |
-| **GD-48** — GTID domains that do not agree | high | S | check | open |
-| **GD-50** — Triggers that run on one node only | high | S | check | open |
 | **GD-49** — Who is actually writing | med | M | check | open |
 | **GD-51** — The binary log, per node | med | S | check | open |
 | **GD-52** — A node that restarted between runs | med | S | check | open |
 | **GD-53** — The membership as the cluster reports it | low | M | collect,check | open |
+| **GD-47** — Async replication attached to the cluster | high | M | collect,check | shipped `0.11.0` |
+| **GD-48** — GTID domains that do not agree | high | S | check | shipped `0.11.0` |
+| **GD-50** — Triggers that run on one node only | high | S | check | shipped `0.11.0` |
 
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 34 | 10 |
-| `collect` | 4 | 2 |
+| `check` | 34 | 7 |
 | `cli` | 2 | 1 |
+| `collect` | 4 | 1 |
 | `integration` | 1 | 1 |
 | `delivery` | 2 | 0 |
 | `docs` | 4 | 0 |

@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,6 +135,19 @@ func (c Collector) Collect(ctx context.Context, n Node) Snapshot {
 			snap.DataBytes = nil
 			_ = err
 		}
+	}
+
+	// The write paths the cluster is not part of (GD-47). Both reads set an
+	// empty slice on success and leave nil on failure: "there is no async
+	// replication" and "we were not allowed to look" are different findings,
+	// and audit/coverage reports the second one.
+	if snap.Replicas, err = replicaLinks(ctx, db); err != nil {
+		snap.Replicas = nil
+		_ = err
+	}
+	if snap.ReplicaHosts, err = replicaHosts(ctx, db); err != nil {
+		snap.ReplicaHosts = nil
+		_ = err
 	}
 	return snap
 }
@@ -420,6 +434,126 @@ func datasetBytes(ctx context.Context, db *sql.DB) (*int64, error) {
 		bytes = int64(total.Float64)
 	}
 	return &bytes, nil
+}
+
+// replicaLinks reads the async replication this node consumes (GD-47).
+//
+// The statement was renamed: MariaDB 10.5 and MySQL 8.0.22 answer SHOW REPLICA
+// STATUS, everything older only SHOW SLAVE STATUS. Both are tried, because a
+// cluster in the wild is rarely all one version — cluster/versions exists for
+// that exact reason.
+//
+// The columns were renamed with the statement (Source_Host vs Master_Host), so
+// they are read by name out of whatever the server returned rather than by
+// position, and a column this build does not have is simply absent.
+func replicaLinks(ctx context.Context, db *sql.DB) ([]ReplicaLink, error) {
+	rows, err := Query(ctx, db, "SHOW REPLICA STATUS")
+	if err != nil {
+		if rows, err = Query(ctx, db, "SHOW SLAVE STATUS"); err != nil {
+			return nil, err
+		}
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	// An empty slice, not nil: the read worked and there may be no rows.
+	out := []ReplicaLink{}
+	for rows.Next() {
+		cells := make([]any, len(cols))
+		values := make([]sql.NullString, len(cols))
+		for i := range cells {
+			cells[i] = &values[i]
+		}
+		if err := rows.Scan(cells...); err != nil {
+			return nil, err
+		}
+		byName := make(map[string]sql.NullString, len(cols))
+		for i, c := range cols {
+			byName[strings.ToLower(c)] = values[i]
+		}
+		get := func(names ...string) string {
+			for _, n := range names {
+				if v, ok := byName[n]; ok && v.Valid {
+					return strings.TrimSpace(v.String)
+				}
+			}
+			return ""
+		}
+		link := ReplicaLink{
+			Name:       get("connection_name"),
+			Source:     get("source_host", "master_host"),
+			IORunning:  strings.EqualFold(get("replica_io_running", "slave_io_running"), "Yes"),
+			SQLRunning: strings.EqualFold(get("replica_sql_running", "slave_sql_running"), "Yes"),
+			LastError:  get("last_error", "last_io_error", "last_sql_error"),
+		}
+		// NULL exactly when the link is not running, so a zero here would read
+		// as "perfectly caught up".
+		if v, ok := byName["seconds_behind_source"]; ok && v.Valid {
+			if f, err := strconv.ParseFloat(v.String, 64); err == nil {
+				link.Behind = &f
+			}
+		} else if v, ok := byName["seconds_behind_master"]; ok && v.Valid {
+			if f, err := strconv.ParseFloat(v.String, 64); err == nil {
+				link.Behind = &f
+			}
+		}
+		if link.Source == "" {
+			continue
+		}
+		out = append(out, link)
+	}
+	return out, rows.Err()
+}
+
+// replicaHosts reads what replicates from this node (GD-47). Renamed like the
+// statement above, and equally optional.
+func replicaHosts(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := Query(ctx, db, "SHOW REPLICAS")
+	if err != nil {
+		if rows, err = Query(ctx, db, "SHOW SLAVE HOSTS"); err != nil {
+			return nil, err
+		}
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for rows.Next() {
+		values := make([]sql.NullString, len(cols))
+		cells := make([]any, len(cols))
+		for i := range cells {
+			cells[i] = &values[i]
+		}
+		if err := rows.Scan(cells...); err != nil {
+			return nil, err
+		}
+		host, port := "", ""
+		for i, c := range cols {
+			switch strings.ToLower(c) {
+			case "host":
+				host = values[i].String
+			case "port":
+				port = values[i].String
+			case "server_id":
+				if host == "" {
+					host = "server_id " + values[i].String
+				}
+			}
+		}
+		if host == "" {
+			continue
+		}
+		if port != "" {
+			host += ":" + port
+		}
+		out = append(out, host)
+	}
+	return out, rows.Err()
 }
 
 // redact keeps a DSN — and therefore a password — out of an error message. A

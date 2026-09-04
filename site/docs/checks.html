@@ -139,6 +139,38 @@ The write succeeds. Nothing certifies it, nothing replicates it, and no counter 
 <p>
 MariaDB can be told to replicate MyISAM and Aria (<code>wsrep_mode</code>, or the older <code>wsrep_replicate_myisam</code>). That is experimental, and it is <strong>per node</strong>: when the nodes disagree about it the finding is <code>BAD</code> rather than <code>WARN</code>, because then the same write lands on some of them and not others.
 </p>
+<h2 id="the-write-paths-nobody-drew">The write paths nobody drew</h2>
+<p>
+A cluster is drawn as three nodes replicating to each other. Real deployments are rarely that tidy, and <strong>the cluster cannot see a write path it is not part of</strong> — so none of this appears in any <code>wsrep_*</code> counter.
+</p>
+<h3 id="repl-async-in-repl-async-out"><code>repl/async-in</code>, <code>repl/async-out</code></h3>
+<p>
+<code>SHOW REPLICA STATUS</code> and <code>SHOW REPLICAS</code> per node — under their older names on older builds, and read by column name because those were renamed with the statements.
+</p>
+<ul>
+<li>A member that is <strong>also an async replica</strong> is a second write path into the cluster: <code>WARN</code>, naming the source. Those writes certify like any other and the cluster has no opinion about where they came from.</li>
+<li>A link that is <strong>configured and not running</strong> is <code>BAD</code>, carrying the server's own error. Somebody believes those writes are arriving — and a link that resumes after a long stop replays everything it missed into a cluster that has moved on.</li>
+<li>A member <strong>feeding a downstream replica</strong> is <code>WARN</code>: a dependency the rest of the cluster knows nothing about, and the next SST rebuilds this node's binary logs out from under it.</li>
+</ul>
+<p>
+<code>nil</code> versus empty is load-bearing here: a server with no replication answers with zero rows, and that is a different statement from a read that was refused. The second is reported by <a href="#auditcoverage"><code>audit/coverage</code></a>.
+</p>
+<h3 id="repl-server-id-repl-gtid-domain-repl-gtid-strict"><code>repl/server-id</code>, <code>repl/gtid-domain</code>, <code>repl/gtid-strict</code></h3>
+<ul>
+<li><strong><code>repl/server-id</code></strong> — two nodes sharing a <code>server_id</code> is <code>BAD</code>, with or without a binary log: a replica downstream cannot tell their events apart, and a replication loop becomes possible.</li>
+<li><strong><code>repl/gtid-domain</code></strong> — every node in the cluster should share <code>gtid_domain_id</code>. With different ones, a failover <em>inside</em> the cluster rewrites history for every replica reading from it, and nothing inside the cluster notices, because replication here is by writeset.</li>
+<li><strong><code>repl/gtid-strict</code></strong> — <code>gtid_strict_mode</code> differing means whether a downstream replica refuses a bad sequence depends on which node it happened to be reading from.</li>
+</ul>
+<p>
+The two GTID checks are graded <strong>only when some node has a binary log</strong>: with nothing able to replicate out, a domain id that cannot reach anybody is not a finding. This tool does not have opinions about settings nothing reads.
+</p>
+<h3 id="repl-triggers"><code>repl/triggers</code></h3>
+<p>
+<code>wsrep_slave_run_triggers</code> per node. The writer's trigger has already put its rows into the writeset, so an applier that runs the trigger again applies them twice, and one that does not is doing the right thing.
+</p>
+<p>
+The nodes <strong>disagreeing</strong> is therefore <code>BAD</code> — the same statement ends up with different rows per node, and certification compares writesets rather than their consequences. Uniformly on is <code>WARN</code>: the nodes stay consistent with each other, but every row the trigger writes is applied twice unless the trigger expects that.
+</p>
 <h2 id="what-the-next-restart-costs">What the next restart costs</h2>
 <p>
 Everything in this section is free today. It is a state the cluster has already decided, and the bill arrives at the next restart, failover or partition — which is why no <code>wsrep_*</code> counter has an opinion about any of it.

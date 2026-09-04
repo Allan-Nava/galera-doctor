@@ -59,6 +59,18 @@ type Snapshot struct {
 	// TablesNoPK lists application tables without a primary key. Galera's
 	// row-based certification needs one.
 	TablesNoPK []string `json:"tables_no_pk,omitempty"`
+	// Replicas is the async replication this node consumes: one entry per
+	// source, because a server can have several named connections. nil means
+	// the status was not read; an empty slice means it was read and there is
+	// none — a cluster member that is also an async replica is a second write
+	// path into the cluster, and the cluster cannot see a path it is not part
+	// of (GD-47).
+	Replicas []ReplicaLink `json:"replicas,omitempty"`
+	// ReplicaHosts is what replicates *from* this node: hosts connected as
+	// replicas. nil means not read. Each one is a dependency nobody else in
+	// the cluster knows about, and the next state transfer rebuilds this
+	// node's binlogs out from under them.
+	ReplicaHosts []string `json:"replica_hosts,omitempty"`
 	// DataBytes is what a full state transfer would have to copy: the data and
 	// index length of every application table. A pointer because nil means
 	// "not read" — a cluster that holds no data at all is a different
@@ -73,6 +85,27 @@ type Snapshot struct {
 	// ERROR rather than skipping the node quietly.
 	Err string `json:"error,omitempty"`
 }
+
+// ReplicaLink is one async replication connection into this node.
+type ReplicaLink struct {
+	// Name is the connection name for a multi-source setup, "" for the
+	// default one.
+	Name   string `json:"name,omitempty"`
+	Source string `json:"source"`
+	// IORunning and SQLRunning are the two threads. A link that is configured
+	// and not running is worse than no link: somebody believes those writes
+	// are arriving.
+	IORunning  bool `json:"io_running"`
+	SQLRunning bool `json:"sql_running"`
+	// Behind is Seconds_Behind_Source, nil when the server reports NULL —
+	// which it does precisely when the link is not running, so a zero here
+	// would read as "perfectly caught up".
+	Behind    *float64 `json:"behind_seconds,omitempty"`
+	LastError string   `json:"last_error,omitempty"`
+}
+
+// Running reports whether both threads are up.
+func (r ReplicaLink) Running() bool { return r.IORunning && r.SQLRunning }
 
 // OK reports whether the node was read.
 func (s Snapshot) OK() bool { return s.Err == "" }

@@ -161,6 +161,9 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(appliers(rep.Cluster, live)...)
 	add(sstSize(rep.Cluster, live)...)
 	add(latency(rep.Cluster, live, opt)...)
+	add(serverIdentity(rep.Cluster, live)...)
+	add(applierTriggers(rep.Cluster, live)...)
+	add(asyncReplication(live)...)
 	add(coverage(rep.Cluster, snaps, live, prev)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
@@ -1612,7 +1615,7 @@ func sstSize(name string, live []cluster.Snapshot) []finding.Finding {
 // is a choice, and warning about a choice on every run is how a check stops
 // being read.
 func coverage(name string, snaps, live []cluster.Snapshot, prev *state.State) []finding.Finding {
-	var unread, noSysTables, noSchema, noClock, noSize []string
+	var unread, noSysTables, noSchema, noClock, noSize, noReplication []string
 	for _, s := range snaps {
 		if !s.OK() {
 			unread = append(unread, s.Node)
@@ -1630,6 +1633,9 @@ func coverage(name string, snaps, live []cluster.Snapshot, prev *state.State) []
 		}
 		if s.DataBytes == nil {
 			noSize = append(noSize, s.Node)
+		}
+		if s.Replicas == nil && s.ReplicaHosts == nil {
+			noReplication = append(noReplication, s.Node)
 		}
 	}
 
@@ -1653,6 +1659,10 @@ func coverage(name string, snaps, live []cluster.Snapshot, prev *state.State) []
 	}
 	if len(noSize) > 0 {
 		gaps = append(gaps, "the dataset size on "+strings.Join(noSize, ", "))
+		access = true
+	}
+	if len(noReplication) > 0 {
+		gaps = append(gaps, "the replication status on "+strings.Join(noReplication, ", "))
 		access = true
 	}
 	if prev == nil {
@@ -1900,6 +1910,205 @@ func latency(name string, live []cluster.Snapshot, opt Options) []finding.Findin
 		Message: "replication latency as the cluster measures it — " + strings.Join(parts, "; "),
 		Hint:    "across segments this is distance and nothing to fix; inside one it is the link or the node",
 	})
+	return out
+}
+
+// serverIdentity reports what breaks outside the cluster (GD-48).
+//
+// server_id has to be distinct on every node: two members sharing one make an
+// async replica downstream unable to tell their events apart, and a replication
+// loop possible. gtid_domain_id is the opposite requirement — every node should
+// share it, or a failover inside the cluster rewrites history for every replica
+// reading from it.
+//
+// Neither is visible from inside: the cluster replicates by writeset and does
+// not care. The nodes only find out through somebody else's replica, which is
+// why the domain checks are graded only when a binary log exists to replicate
+// from at all. This tool does not have opinions about settings nothing reads.
+func serverIdentity(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+
+	// Duplicate server ids, with or without a binlog: this one breaks the
+	// cluster's own internals too.
+	ids := map[string][]string{}
+	for _, s := range live {
+		v, ok := s.Var("server_id")
+		if !ok || strings.TrimSpace(v) == "" {
+			continue
+		}
+		id := strings.TrimSpace(v)
+		ids[id] = append(ids[id], s.Node)
+	}
+	var dupes []string
+	keys := make([]string, 0, len(ids))
+	for id := range ids {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	for _, id := range keys {
+		if len(ids[id]) < 2 {
+			continue
+		}
+		nodes := append([]string(nil), ids[id]...)
+		sort.Strings(nodes)
+		dupes = append(dupes, fmt.Sprintf("%s on %s", id, strings.Join(nodes, ", ")))
+	}
+	if len(dupes) > 0 {
+		out = append(out, finding.Finding{
+			Check: "repl/server-id", Target: name, Status: finding.BAD,
+			Message: "nodes share a server_id: " + strings.Join(dupes, "; "),
+			Hint:    "an async replica downstream cannot tell their events apart, and a replication loop becomes possible — every node needs its own, and it has to survive being rebuilt from a backup",
+		})
+	}
+
+	// Anything that leaves the cluster needs a binary log somewhere.
+	binlog := false
+	for _, s := range live {
+		if on, ok := s.Bool("log_bin"); ok && on {
+			binlog = true
+			break
+		}
+	}
+	if !binlog {
+		return out
+	}
+
+	for _, v := range []struct {
+		key, check, hint string
+	}{
+		{"gtid_domain_id", "repl/gtid-domain",
+			"every node in the cluster should share the domain: with different ones, a failover inside the cluster rewrites history for every downstream replica reading from it — and nothing inside the cluster notices, because replication here is by writeset"},
+		{"gtid_strict_mode", "repl/gtid-strict",
+			"the nodes enforce different rules about out-of-order GTIDs, so whether a downstream replica refuses a bad sequence depends on which node it happened to be reading from"},
+	} {
+		var reporting []cluster.Snapshot
+		for _, s := range live {
+			if val, ok := s.Var(v.key); ok && strings.TrimSpace(val) != "" {
+				reporting = append(reporting, s)
+			}
+		}
+		if len(reporting) < 2 {
+			continue
+		}
+		groups := groupBy(reporting, func(s cluster.Snapshot) string {
+			val, _ := s.Var(v.key)
+			return strings.TrimSpace(val)
+		})
+		if len(groups) == 1 {
+			continue
+		}
+		out = append(out, finding.Finding{
+			Check: v.check, Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("nodes disagree about %s: %s", v.key, describeGroups(groups)),
+			Hint:    v.hint,
+		})
+	}
+	return out
+}
+
+// applierTriggers reports triggers that run on one node only (GD-50).
+//
+// A trigger on the writer has already put its rows into the writeset, so an
+// applier that runs the trigger again applies them twice, and one that does not
+// is doing the right thing. Nodes disagreeing is therefore divergence produced
+// by design — the same statement, applied on each node, ends up with different
+// rows — and it is certified by nothing, because certification compares
+// writesets and not their consequences.
+func applierTriggers(name string, live []cluster.Snapshot) []finding.Finding {
+	var reporting []cluster.Snapshot
+	on := 0
+	for _, s := range live {
+		v, ok := s.Bool("wsrep_slave_run_triggers")
+		if _, present := s.Var("wsrep_slave_run_triggers"); !present || !ok {
+			continue
+		}
+		reporting = append(reporting, s)
+		if v {
+			on++
+		}
+	}
+	if len(reporting) < 2 {
+		return nil
+	}
+	groups := groupBy(reporting, func(s cluster.Snapshot) string {
+		v, _ := s.Var("wsrep_slave_run_triggers")
+		return strings.ToUpper(strings.TrimSpace(v))
+	})
+
+	const consequence = "the writer's trigger has already put its rows in the writeset, so an applier that runs the trigger again applies them twice"
+	if len(groups) > 1 {
+		return []finding.Finding{{
+			Check: "repl/triggers", Target: name, Status: finding.BAD,
+			Message: "nodes disagree about wsrep_slave_run_triggers: " + describeGroups(groups),
+			Hint:    consequence + " — so the same statement ends up with different rows per node, and certification compares writesets rather than their consequences",
+		}}
+	}
+	if on == len(reporting) {
+		return []finding.Finding{{
+			Check: "repl/triggers", Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("all %d node(s) run triggers on apply (wsrep_slave_run_triggers is ON)", len(reporting)),
+			Hint:    consequence + " — uniform, so the nodes stay consistent with each other, but each row the trigger writes is applied twice unless the trigger is written to expect that",
+		}}
+	}
+	return nil
+}
+
+// asyncReplication reports the write paths a cluster diagram does not show
+// (GD-47).
+//
+// A cluster is drawn as three nodes replicating to each other. It does not show
+// the member that is also an async replica of a legacy server — a second write
+// path *into* the cluster, whose writes are certified like any other and
+// arrive from somewhere nobody listed — nor the member feeding a reporting
+// replica downstream, which is a dependency the other nodes know nothing about
+// and which the next state transfer breaks, because an SST rebuilds this
+// node's binary logs out from under whoever is reading them.
+//
+// The cluster cannot see a write path it is not part of, which is why none of
+// this appears in any wsrep_* counter.
+func asyncReplication(live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, s := range live {
+		for _, link := range s.Replicas {
+			name := link.Name
+			if name == "" {
+				name = "the default connection"
+			}
+			if !link.Running() {
+				msg := fmt.Sprintf("async replication from %s is configured and not running (%s)", link.Source, name)
+				if link.LastError != "" {
+					msg += ": " + link.LastError
+				}
+				out = append(out, finding.Finding{
+					Check: "repl/async-in", Target: s.Node, Status: finding.BAD,
+					Message: msg,
+					Hint:    "somebody believes those writes are arriving in this cluster — and a link that resumes after a long stop replays everything it missed into a cluster that has moved on",
+				})
+				continue
+			}
+			msg := fmt.Sprintf("replicating asynchronously from %s (%s)", link.Source, name)
+			if link.Behind != nil {
+				msg += fmt.Sprintf(", %s behind", (time.Duration(*link.Behind) * time.Second).String())
+			}
+			out = append(out, finding.Finding{
+				Check: "repl/async-in", Target: s.Node, Status: finding.WARN,
+				Message: msg,
+				Hint:    "this is a second write path into the cluster, from a server no cluster check can see: those writes certify like any other, and the cluster has no opinion about where they came from",
+			})
+		}
+
+		if len(s.ReplicaHosts) == 0 {
+			continue
+		}
+		hosts := append([]string(nil), s.ReplicaHosts...)
+		sort.Strings(hosts)
+		out = append(out, finding.Finding{
+			Check: "repl/async-out", Target: s.Node, Status: finding.WARN,
+			Message: fmt.Sprintf("%d replica(s) read from this node: %s", len(hosts), strings.Join(hosts, ", ")),
+			Value:   finding.Num(float64(len(hosts))), Unit: "replicas",
+			Hint: "a dependency the rest of the cluster knows nothing about: the next SST rebuilds this node's binary logs out from under them, and so does anything that reinitialises it",
+		})
+	}
 	return out
 }
 

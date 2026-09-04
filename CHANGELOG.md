@@ -6,6 +6,45 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.11.0] - 2026-09-04
+
+M7's high-priority half: the write paths a cluster diagram does not show.
+
+### Added
+
+- **`repl/async-in`, `repl/async-out`** (GD-47) — `SHOW REPLICA STATUS` and
+  `SHOW REPLICAS` per node, under their older names on older builds and read by
+  column name, because the columns were renamed with the statements. A member
+  that is also an async replica is a second write path *into* the cluster
+  (`WARN`, naming the source); a configured link that is not running is `BAD`
+  and carries the server's own error, because somebody believes those writes
+  are arriving; a member feeding a downstream replica is a dependency the rest
+  of the cluster knows nothing about, and the next SST rebuilds its binary logs
+  out from under it.
+
+  Verified against two real MariaDB servers replicating to each other, running
+  and stopped: the replica reports its source with both threads up and zero
+  seconds behind, the source reports its downstream replica by host and port,
+  and a stopped link reports both threads down with no `Seconds_Behind_Source`
+  at all — which is why that field is a pointer, since a zero there would read
+  as "perfectly caught up".
+
+- **`repl/server-id`, `repl/gtid-domain`, `repl/gtid-strict`** (GD-48) — two
+  nodes sharing a `server_id` is `BAD` with or without a binary log: a replica
+  downstream cannot tell their events apart and a replication loop becomes
+  possible. The two GTID checks are graded only when some node has a binary
+  log, because with nothing able to replicate out, a domain id that cannot
+  reach anybody is not a finding.
+
+- **`repl/triggers`** (GD-50) — `wsrep_slave_run_triggers` per node. The
+  writer's trigger has already put its rows in the writeset, so an applier that
+  runs it again applies them twice. Nodes disagreeing is `BAD` — the same
+  statement ends up with different rows per node, and certification compares
+  writesets rather than their consequences. Uniformly on is `WARN`.
+
+- **`audit/coverage`** now reports a replication status that could not be read,
+  alongside the other gaps.
+
 ## [0.10.1] - 2026-09-04
 
 ### Fixed

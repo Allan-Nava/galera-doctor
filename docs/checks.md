@@ -96,6 +96,62 @@ MariaDB can be told to replicate MyISAM and Aria (`wsrep_mode`, or the older
 the nodes disagree about it the finding is `BAD` rather than `WARN`, because
 then the same write lands on some of them and not others.
 
+## The write paths nobody drew
+
+A cluster is drawn as three nodes replicating to each other. Real deployments
+are rarely that tidy, and **the cluster cannot see a write path it is not part
+of** — so none of this appears in any `wsrep_*` counter.
+
+### `repl/async-in`, `repl/async-out`
+
+`SHOW REPLICA STATUS` and `SHOW REPLICAS` per node — under their older names on
+older builds, and read by column name because those were renamed with the
+statements.
+
+- A member that is **also an async replica** is a second write path into the
+  cluster: `WARN`, naming the source. Those writes certify like any other and
+  the cluster has no opinion about where they came from.
+- A link that is **configured and not running** is `BAD`, carrying the server's
+  own error. Somebody believes those writes are arriving — and a link that
+  resumes after a long stop replays everything it missed into a cluster that has
+  moved on.
+- A member **feeding a downstream replica** is `WARN`: a dependency the rest of
+  the cluster knows nothing about, and the next SST rebuilds this node's binary
+  logs out from under it.
+
+`nil` versus empty is load-bearing here: a server with no replication answers
+with zero rows, and that is a different statement from a read that was refused.
+The second is reported by [`audit/coverage`](#auditcoverage).
+
+### `repl/server-id`, `repl/gtid-domain`, `repl/gtid-strict`
+
+- **`repl/server-id`** — two nodes sharing a `server_id` is `BAD`, with or
+  without a binary log: a replica downstream cannot tell their events apart, and
+  a replication loop becomes possible.
+- **`repl/gtid-domain`** — every node in the cluster should share
+  `gtid_domain_id`. With different ones, a failover *inside* the cluster
+  rewrites history for every replica reading from it, and nothing inside the
+  cluster notices, because replication here is by writeset.
+- **`repl/gtid-strict`** — `gtid_strict_mode` differing means whether a
+  downstream replica refuses a bad sequence depends on which node it happened to
+  be reading from.
+
+The two GTID checks are graded **only when some node has a binary log**: with
+nothing able to replicate out, a domain id that cannot reach anybody is not a
+finding. This tool does not have opinions about settings nothing reads.
+
+### `repl/triggers`
+
+`wsrep_slave_run_triggers` per node. The writer's trigger has already put its
+rows into the writeset, so an applier that runs the trigger again applies them
+twice, and one that does not is doing the right thing.
+
+The nodes **disagreeing** is therefore `BAD` — the same statement ends up with
+different rows per node, and certification compares writesets rather than their
+consequences. Uniformly on is `WARN`: the nodes stay consistent with each other,
+but every row the trigger writes is applied twice unless the trigger expects
+that.
+
 ## What the next restart costs
 
 Everything in this section is free today. It is a state the cluster has already
