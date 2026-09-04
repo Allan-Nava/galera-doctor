@@ -6,6 +6,22 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [0.10.1] - 2026-09-04
+
+### Fixed
+
+- **The release notes made the tree dirty** (GD-56) — goreleaser refuses to
+  release from a dirty working tree, and the step that lifts the notes out of
+  `CHANGELOG.md` wrote them to `notes.md` in the repository root. The first
+  goreleaser release, v0.10.0, failed after 0s with `git is in a dirty state`
+  — before creating a release, so nothing had to be cleaned up, but the error
+  reads like a goreleaser problem rather than "your own pipeline wrote a file".
+
+  The notes go to the runner's temp directory now and are handed over by path.
+  `scripts/release_test.sh` asserts both the fix and the premise behind it: a
+  file written into the tree shows up in `git status --porcelain`, and one
+  written outside does not.
+
 ## [0.10.0] - 2026-09-04
 
 ### Changed

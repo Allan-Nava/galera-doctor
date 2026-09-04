@@ -121,6 +121,7 @@ fi
 # command, an image tag that never becomes a manifest.
 # ---------------------------------------------------------------------------
 config="$root/.goreleaser.yaml"
+workflow="$root/.github/workflows/release.yml"
 
 checks=$((checks + 1))
 if [ -f "$config" ]; then pass "there is a goreleaser configuration"; else
@@ -242,6 +243,45 @@ fi
 has_brew "it asserts the tap serves the latest release" "releases/latest"
 has_brew "and that Gatekeeper will let the binary run" "com.apple.quarantine"
 has_brew "a hung install fails instead of looking busy" "timeout-minutes"
+
+# ---------------------------------------------------------------------------
+# The release notes must not be written inside the repository.
+#
+# goreleaser refuses to release from a dirty tree — "git is in a dirty state" —
+# and a notes file dropped in the repository root is exactly that. v0.10.0
+# failed on it after 0s, before creating anything, with an error that reads
+# like a goreleaser problem rather than "your pipeline wrote a file".
+# ---------------------------------------------------------------------------
+checks=$((checks + 1))
+if grep -qE '\.\/scripts\/release\.sh notes[^>]*>[ ]*notes\.md' "$workflow"; then
+	fail "the notes are written into the repository root: goreleaser will refuse the dirty tree"
+	grep -n "release.sh notes" "$workflow" | sed 's/^/       /' >&2
+else
+	pass "the notes are not written into the repository root"
+fi
+
+checks=$((checks + 1))
+if grep -qF "runner.temp" "$workflow" && grep -qF -- "--release-notes=" "$workflow"; then
+	pass "they go to the runner temp directory and are passed by path"
+else
+	fail "the notes are not written outside the tree and handed to goreleaser by path"
+fi
+
+# The demonstration, rather than the assertion: a file in the repository root
+# is what git reports, and a file in TMPDIR is not.
+checks=$((checks + 1))
+probe="$root/.galera-doctor-dirty-probe"
+: >"$probe"
+dirty=$( (cd "$root" && git status --porcelain) | grep -c 'galera-doctor-dirty-probe' || true)
+rm -f "$probe"
+outside="$tmp/notes.md"
+: >"$outside"
+clean=$( (cd "$root" && git status --porcelain) | grep -c 'notes.md' || true)
+if [ "$dirty" -ge 1 ] && [ "$clean" -eq 0 ]; then
+	pass "a file in the tree is dirty, a file in the temp directory is not"
+else
+	fail "the dirty-state premise does not hold (in-tree $dirty, outside $clean)"
+fi
 
 echo
 if [ "$failures" -gt 0 ]; then

@@ -142,6 +142,12 @@ touching this file, or CI will fail.
   needs. One release shape across the tools, and `brew install --cask
   Allan-Nava/tap/galera-doctor` alongside its siblings.
   <!-- gd: prio=high size=M labels=release,delivery ver=0.10.0 -->
+- [x] **GD-56 — The release notes made the tree dirty**: goreleaser refuses to
+  release from a dirty working tree, and the notes file was written into the
+  repository root — so v0.10.0 failed after 0s, before creating anything, with
+  an error that reads like a goreleaser problem. The notes go to the runner
+  temp directory now, with the premise itself asserted in the test.
+  <!-- gd: prio=high size=S labels=release,tests ver=0.10.1 -->
 - [x] **GD-21 — Docs site**: `docs/` published with the same POSIX-sh generator
   the sibling tools use, with a dead-link gate in CI.
   <!-- gd: prio=med size=M labels=docs ver=0.9.0 -->

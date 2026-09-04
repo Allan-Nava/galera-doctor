@@ -48,8 +48,13 @@ jobs:
       - run: go test -race ./...
 
       # Written up before it is published, or the release page says nothing.
+      #
+      # Into the runner's temp directory, never the repository: goreleaser
+      # refuses to release from a dirty tree, and a notes file in the root is
+      # exactly that. v0.10.0 failed on it after 0s, with an error that reads
+      # like a goreleaser problem rather than "your pipeline wrote a file".
       - name: Release notes, lifted from CHANGELOG.md
-        run: ./scripts/release.sh notes "${{ steps.v.outputs.tag }}" >notes.md
+        run: ./scripts/release.sh notes "${{ steps.v.outputs.tag }}" >"${{ runner.temp }}/notes.md"
 
       # Without this the cask step fails inside goreleaser with a template
       # error about an empty environment variable, which reads like a
@@ -78,7 +83,7 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --release-notes=notes.md
+          args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ github.token }}
           # A PAT with repo scope: pushing the cask writes to another
