@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**56 items · 52 shipped · 4 open · 9 milestones.**
+**57 items · 53 shipped · 4 open · 9 milestones.**
 
 ## At a glance
 
@@ -20,7 +20,7 @@
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
 | **M7** — Every write path, drawn or not | `v1.0.0` | shipped | `##########` 100% | 0 | 7 |
 | **M8** — Parked, and why | `v2.0.0` | later | `..........` 0% | 3 | 0 |
-| **M9** — Beyond Galera | `v2.0.0` | later | `..........` 0% | 1 | 0 |
+| **M9** — Beyond Galera | `v2.0.0` | later | `#####.....` 50% | 1 | 1 |
 
 ## Next up
 
@@ -143,17 +143,18 @@ Target `v2.0.0` · later · 3 open · 0 shipped · `..........` 0%
 
 ### M9 — Beyond Galera
 
-Target `v2.0.0` · later · 1 open · 0 shipped · `..........` 0%
+Target `v2.0.0` · later · 1 open · 1 shipped · `#####.....` 50%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-22** — Percona XtraDB Cluster and MySQL Group Replication | low | XL | check | open |
+| **GD-57** — MySQL Group Replication | low | XL | check | open |
+| **GD-22** — Percona XtraDB Cluster | low | S | check | shipped `1.1.0` |
 
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 34 | 3 |
+| `check` | 35 | 3 |
 | `integration` | 1 | 1 |
 | `cli` | 2 | 0 |
 | `collect` | 4 | 0 |

@@ -139,6 +139,16 @@ The write succeeds. Nothing certifies it, nothing replicates it, and no counter 
 <p>
 MariaDB can be told to replicate MyISAM and Aria (<code>wsrep_mode</code>, or the older <code>wsrep_replicate_myisam</code>). That is experimental, and it is <strong>per node</strong>: when the nodes disagree about it the finding is <code>BAD</code> rather than <code>WARN</code>, because then the same write lands on some of them and not others.
 </p>
+<h3 id="pxc-strict-mode"><code>pxc/strict-mode</code></h3>
+<p>
+Percona XtraDB Cluster is Galera under another name — the same provider, the same <code>wsrep_*</code> variables — so every check on this page already applies to it. The one thing it adds is <code>pxc_strict_mode</code>, which decides whether a node <strong>refuses</strong> the operations that break replication silently: a table with no primary key, a write to a MyISAM table, an unsupported DDL.
+</p>
+<p>
+It is per node like everything else here, so the nodes <strong>disagreeing</strong> is <code>BAD</code> and not the obvious case: the permissive node accepts a statement its peers would have rejected, and the cluster then has to replicate something it was configured to refuse. Uniformly off is <code>WARN</code>, and the finding names <a href="#schemano-pk"><code>schema/no-pk</code></a> and <a href="#schemaengine"><code>schema/engine</code></a> — with the guard rail down, those are the consequences rather than warnings about a possibility.
+</p>
+<p>
+MariaDB has no such variable, and a verdict about a setting that does not exist is not a verdict.
+</p>
 <h2 id="the-write-paths-nobody-drew">The write paths nobody drew</h2>
 <p>
 A cluster is drawn as three nodes replicating to each other. Real deployments are rarely that tidy, and <strong>the cluster cannot see a write path it is not part of</strong> — so none of this appears in any <code>wsrep_*</code> counter.

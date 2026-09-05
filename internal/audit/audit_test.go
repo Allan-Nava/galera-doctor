@@ -119,6 +119,27 @@ func baseline(snaps []cluster.Snapshot, ago time.Duration) *state.State {
 	return &st
 }
 
+// pxc is the same fixture cluster running Percona XtraDB Cluster: the same
+// wsrep_* variables, none of the MariaDB-only ones, and pxc_strict_mode.
+func pxc() []cluster.Snapshot {
+	snaps := threeHealthy()
+	for i := range snaps {
+		for _, mariadbOnly := range []string{
+			"wsrep_slave_run_triggers", "gtid_domain_id", "gtid_strict_mode",
+			"wsrep_applier_threads", "wsrep_mode",
+		} {
+			delete(snaps[i].Vars, mariadbOnly)
+		}
+		snaps[i].Vars["version"] = "8.0.36-28.1"
+		snaps[i].Vars["version_comment"] = "Percona XtraDB Cluster (GPL), Release rel28"
+		// A status variable on PXC and on MariaDB alike, never a system one:
+		// checked against a real server of each.
+		snaps[i].Status["wsrep_provider_version"] = "4.27(a6b54d8)"
+		snaps[i].Vars["pxc_strict_mode"] = "ENFORCING"
+	}
+	return snaps
+}
+
 func opts() Options {
 	o := DefaultOptions()
 	o.Cluster = "compress"
@@ -2195,5 +2216,82 @@ func TestNoMembershipViewIsNotAGap(t *testing.T) {
 	f := one(t, rep, "audit/coverage")
 	if strings.Contains(f.Message, "membership") {
 		t.Fatalf("an optional plugin that is not installed is not a gap: %q", f.Message)
+	}
+}
+
+// GD-22a — Percona XtraDB Cluster.
+//
+// PXC is Galera under another name: the same provider, the same wsrep_*
+// variables, so every check here already applies to it. What it adds is
+// pxc_strict_mode, which decides whether a node *refuses* the operations that
+// break replication silently — a table with no primary key, a write to a
+// MyISAM table — and which is per node like everything else in this report.
+func TestNodesDisagreeingAboutStrictModeIsBad(t *testing.T) {
+	snaps := pxc()
+	snaps[1].Vars["pxc_strict_mode"] = "DISABLED"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "pxc/strict-mode")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the permissive node must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "refuses") && !strings.Contains(f.Hint, "accepts") {
+		t.Fatalf("the hint has to say what the difference does: %q", f.Hint)
+	}
+}
+
+// Uniformly off is the cause behind the findings schema/no-pk and
+// schema/engine report: worth one line that names them, not an outage.
+func TestStrictModeOffEverywhereWarnsAndNamesTheConsequences(t *testing.T) {
+	snaps := pxc()
+	for i := range snaps {
+		snaps[i].Vars["pxc_strict_mode"] = "DISABLED"
+	}
+	f := one(t, Run(snaps, nil, opts()), "pxc/strict-mode")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Hint, "schema/no-pk") || !strings.Contains(f.Hint, "schema/engine") {
+		t.Fatalf("the hint has to point at the checks that report the consequences: %q", f.Hint)
+	}
+}
+
+func TestUniformEnforcingIsQuiet(t *testing.T) {
+	rep := Run(pxc(), nil, opts())
+	if fs := byCheck(t, rep, "pxc/strict-mode"); len(fs) != 0 {
+		t.Fatalf("enforcing everywhere is the answer, not a finding: %+v", fs)
+	}
+}
+
+// A MariaDB cluster has no such variable, and inventing a verdict about a
+// setting that does not exist is the failure this repository refuses
+// everywhere else.
+func TestStrictModeIsNotGradedOnMariaDB(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "pxc/strict-mode"); len(fs) != 0 {
+		t.Fatalf("MariaDB has no pxc_strict_mode: %+v", fs)
+	}
+}
+
+// The rest of the audit has to be quiet on a healthy PXC cluster too: the
+// MariaDB-only variables are simply absent, and absent is not a finding.
+func TestAHealthyPXCClusterIsQuiet(t *testing.T) {
+	rep := Run(pxc(), nil, opts())
+	if rep.Worst() != finding.OK {
+		t.Fatalf("a healthy PXC cluster must produce nothing above OK, got %s:\n%+v", rep.Worst(), rep.Findings)
+	}
+}
+
+// And the checks that do apply still fire on it: PXC is not a special case,
+// it is the same cluster model.
+func TestPXCIsStillAuditedLikeAnyCluster(t *testing.T) {
+	snaps := pxc()
+	snaps[2].Status["wsrep_cluster_state_uuid"] = "9999aaaa-2222-11ef-9d2b-000000000002"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "cluster/uuid")
+	if f.Status != finding.BAD {
+		t.Fatalf("a split brain is a split brain whatever the flavour: %+v", f)
 	}
 }

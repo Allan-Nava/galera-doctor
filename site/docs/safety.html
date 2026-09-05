@@ -27,10 +27,11 @@
 <h2 id="the-grants">The grants</h2>
 <pre><code>
 CREATE USER 'audit'@'10.%' IDENTIFIED BY '…';
-GRANT USAGE, PROCESS, SELECT ON *.* TO 'audit'@'10.%';
+GRANT USAGE, PROCESS, SELECT, REPLICATION CLIENT ON *.* TO 'audit'@'10.%';
 </code></pre>
 <ul>
 <li><code>USAGE</code> and <code>PROCESS</code> cover <code>SHOW GLOBAL STATUS</code> and <code>SHOW GLOBAL VARIABLES</code>.</li>
+<li><code>REPLICATION CLIENT</code> covers <code>SHOW REPLICA STATUS</code> and <code>SHOW REPLICAS</code>, which is how <a href="checks.html#repl-async-in-repl-async-out"><code>repl/async-in</code> and <code>repl/async-out</code></a> see a write path the cluster is not part of. Without it those reads are refused and <a href="checks.html#auditcoverage"><code>audit/coverage</code></a> names the node whose replication status could not be read — the audit still runs, it just says what it could not look at.</li>
 <li><code>SELECT</code> is what <code>information_schema</code> needs for the system table drift comparison and the primary key check.</li>
 </ul>
 <p>

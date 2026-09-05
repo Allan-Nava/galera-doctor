@@ -168,6 +168,7 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(writers(rep.Cluster, live, prev, rep.State)...)
 	add(restarted(live, prev, rep.State)...)
 	add(membershipView(rep.Cluster, live)...)
+	add(strictMode(rep.Cluster, live)...)
 	add(coverage(rep.Cluster, snaps, live, prev)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
@@ -2432,6 +2433,54 @@ func membershipView(name string, live []cluster.Snapshot) []finding.Finding {
 		})
 	}
 	return out
+}
+
+// strictMode reports Percona XtraDB Cluster's own guard rail (GD-22).
+//
+// PXC is Galera under another name — the same provider, the same wsrep_*
+// variables — so every check in this file already applies to it. The one thing
+// it adds is pxc_strict_mode, which decides whether a node *refuses* the
+// operations that break replication silently: a table with no primary key, a
+// write to a MyISAM table, an unsupported DDL.
+//
+// It is per node, like everything else here. Nodes disagreeing is the bad case
+// and not the obvious one: the permissive node accepts a statement its peers
+// would have rejected, and the cluster then has to replicate something it was
+// built to refuse. Uniformly off is the *cause* behind what schema/no-pk and
+// schema/engine report, so the finding names them rather than repeating them.
+func strictMode(name string, live []cluster.Snapshot) []finding.Finding {
+	var reporting []cluster.Snapshot
+	for _, s := range live {
+		if v, ok := s.Var("pxc_strict_mode"); ok && strings.TrimSpace(v) != "" {
+			reporting = append(reporting, s)
+		}
+	}
+	if len(reporting) == 0 {
+		return nil
+	}
+	groups := groupBy(reporting, func(s cluster.Snapshot) string {
+		v, _ := s.Var("pxc_strict_mode")
+		return strings.ToUpper(strings.TrimSpace(v))
+	})
+
+	if len(groups) > 1 {
+		return []finding.Finding{{
+			Check: "pxc/strict-mode", Target: name, Status: finding.BAD,
+			Message: "nodes disagree about pxc_strict_mode: " + describeGroups(groups),
+			Hint:    "the permissive node accepts statements its peers refuse — and the cluster then has to replicate something it was configured to reject, which is how a table with no primary key or a MyISAM write gets in through one door",
+		}}
+	}
+	for mode := range groups {
+		if mode != "DISABLED" && mode != "PERMISSIVE" {
+			return nil
+		}
+		return []finding.Finding{{
+			Check: "pxc/strict-mode", Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("pxc_strict_mode is %s on all %d node(s)", mode, len(reporting)),
+			Hint:    "this is the guard rail that refuses what breaks replication silently: with it off, schema/no-pk and schema/engine in this report are the consequences rather than warnings about a possibility",
+		}}
+	}
+	return nil
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.

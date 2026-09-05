@@ -86,7 +86,7 @@ The image is <code>scratch</code> plus the binary. If your DSNs use TLS, mount a
 <h2 id="what-it-needs">What it needs</h2>
 <ul>
 <li>TCP to each node's MySQL port, and to the ProxySQL admin port if you use <code>--proxysql</code>.</li>
-<li>An audit user with <code>USAGE, PROCESS, SELECT</code> — see <a href="safety.html">permissions and safety</a>.</li>
+<li>An audit user with <code>USAGE, PROCESS, SELECT, REPLICATION CLIENT</code> — see <a href="safety.html">permissions and safety</a>.</li>
 <li>A writable path for <code>--state</code>, if you want rates instead of lifetime totals.</li>
 </ul>
 </main>

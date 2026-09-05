@@ -16,7 +16,9 @@
 ---
 
 **galera-doctor audits a MariaDB/MySQL Galera cluster read-only and reports the
-states the cluster's own metrics cannot show you.** One static Go binary, one
+states the cluster's own metrics cannot show you.** MariaDB with the wsrep
+provider and Percona XtraDB Cluster alike — it is the same provider, and a
+variable one flavour does not have is absent rather than a verdict. One static Go binary, one
 dependency, only `SHOW` and `SELECT` — enforced in code, not promised in a
 README.
 
@@ -116,6 +118,7 @@ node/binlog, node/binlog-format            what the cluster cannot be used for: 
 node/binlog-updates                        a node no downstream replica can be moved to
 node/restarted                             a node that came back between two runs (needs --state)
 cluster/membership-view                    the group's own member list against the nodes audited
+pxc/strict-mode                            Percona's guard rail: the node that accepts what its peers refuse
 audit/changes                              what appeared, cleared or got worse since the last run (needs --state)
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
 proxysql/monitor                           a proxy whose Galera monitor stopped: the hostgroups are a photograph
@@ -202,7 +205,7 @@ The audit user needs very little:
 
 ```sql
 CREATE USER 'audit'@'%' IDENTIFIED BY '…';
-GRANT USAGE, PROCESS, SELECT ON *.* TO 'audit'@'%';   -- SELECT is for information_schema
+GRANT USAGE, PROCESS, SELECT, REPLICATION CLIENT ON *.* TO 'audit'@'%';
 ```
 
 Without `SELECT` on `information_schema` the drift comparison reports the node

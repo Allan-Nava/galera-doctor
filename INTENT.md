@@ -42,6 +42,17 @@ cluster ships with:
 The common shape: the state is only visible *between* nodes, or only visible
 *over time*. A per-node instantaneous gauge cannot express either.
 
+## What it runs against
+
+Galera, whoever ships it: MariaDB with the wsrep provider, and Percona XtraDB
+Cluster, which is the same provider under another name — the checks read
+`wsrep_*`, and a variable one flavour does not have is simply absent, never a
+verdict. PXC's own `pxc_strict_mode` is the one thing that needed a check of its
+own.
+
+MySQL Group Replication is **not** supported and would not be by pointing these
+checks at it: it is a different replication model, and a rename is not support.
+
 ## Non-goals
 
 These are refusals, not missing features.

@@ -371,6 +371,12 @@ is a different replication model, and pointing the existing checks at it would
 be a rename rather than support. It is written down as the milestone it would
 have to be.
 
-- [ ] **GD-22 — Percona XtraDB Cluster and MySQL Group Replication**: the first
-  is nearly free, the second is a different model and needs its own checks
-  rather than a rename. <!-- gd: prio=low size=XL labels=check -->
+- [x] **GD-22 — Percona XtraDB Cluster**: the same provider under another name,
+  so every check applies as it stands — verified against a real PXC 8.0 node —
+  plus `pxc/strict-mode`, the guard rail it adds and the one thing that needed a
+  check of its own. <!-- gd: prio=low size=S labels=check ver=1.1.0 -->
+- [ ] **GD-57 — MySQL Group Replication**: a different replication model, not a
+  rename. Its own membership, its own certification, its own failure modes:
+  pointing these checks at it would produce confident findings about variables
+  that do not mean the same thing. It needs its own set, which is what this
+  milestone is for. <!-- gd: prio=low size=XL labels=check -->

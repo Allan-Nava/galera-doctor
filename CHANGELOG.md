@@ -6,6 +6,50 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.1.0] - 2026-09-05
+
+### Added
+
+- **Percona XtraDB Cluster** (GD-22) — the same provider under another name, so
+  every check already applied to it; what this release adds is the proof and
+  the one check PXC needs of its own.
+
+  Verified end to end against a real PXC 8.0 node, and it found things a
+  fixture could not:
+
+  - `wsrep_provider_version` is a **status** variable there, not a system one —
+    which `cluster/provider-version` already read correctly, but the fixture
+    had wrong, so the fixture is now right too;
+  - the audit user needs `REPLICATION CLIENT` for the `repl/async-*` reads
+    added in 1.0.0. Without it `audit/coverage` named the node whose
+    replication status could not be read, which is exactly what that check is
+    for — and the grant is now in [docs/safety.md](docs/safety.md), the README
+    and the install page, where it should have gone with the check;
+  - the run came back `BAD` on `cluster/peers` for a node started with
+    `--wsrep-new-cluster`, whose `wsrep_cluster_address` is an empty
+    `gcomm://`. Correct, and a good demonstration: that node would form its own
+    cluster on the next restart.
+
+- **`pxc/strict-mode`** (GD-22) — the guard rail PXC adds, which decides whether
+  a node *refuses* the operations that break replication silently: a table with
+  no primary key, a write to a MyISAM table. It is per node like everything
+  else here, so the nodes **disagreeing** is `BAD` — the permissive node accepts
+  a statement its peers would have rejected, and the cluster then has to
+  replicate something it was configured to refuse. Uniformly off is `WARN`, and
+  the finding names `schema/no-pk` and `schema/engine`: with the guard rail
+  down, those are the consequences rather than warnings about a possibility.
+  MariaDB has no such variable, and a verdict about a setting that does not
+  exist is not a verdict.
+
+### Changed
+
+- **GD-22 split, because it was two things** — Percona XtraDB Cluster shipped;
+  MySQL Group Replication is now **GD-57**, still in M9 and still not started.
+  It is a different replication model, not a rename: pointing these checks at
+  it would produce confident findings about variables that do not mean the same
+  thing. [INTENT.md](INTENT.md) says so now, under "What it runs against",
+  because a scope promise belongs where the refusals are.
+
 ## [1.0.0] - 2026-09-04
 
 M7 is finished, and with it every milestone that describes work this tool can

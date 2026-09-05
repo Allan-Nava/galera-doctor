@@ -96,6 +96,25 @@ MariaDB can be told to replicate MyISAM and Aria (`wsrep_mode`, or the older
 the nodes disagree about it the finding is `BAD` rather than `WARN`, because
 then the same write lands on some of them and not others.
 
+### `pxc/strict-mode`
+
+Percona XtraDB Cluster is Galera under another name — the same provider, the
+same `wsrep_*` variables — so every check on this page already applies to it.
+The one thing it adds is `pxc_strict_mode`, which decides whether a node
+**refuses** the operations that break replication silently: a table with no
+primary key, a write to a MyISAM table, an unsupported DDL.
+
+It is per node like everything else here, so the nodes **disagreeing** is `BAD`
+and not the obvious case: the permissive node accepts a statement its peers
+would have rejected, and the cluster then has to replicate something it was
+configured to refuse. Uniformly off is `WARN`, and the finding names
+[`schema/no-pk`](#schemano-pk) and [`schema/engine`](#schemaengine) — with the
+guard rail down, those are the consequences rather than warnings about a
+possibility.
+
+MariaDB has no such variable, and a verdict about a setting that does not exist
+is not a verdict.
+
 ## The write paths nobody drew
 
 A cluster is drawn as three nodes replicating to each other. Real deployments

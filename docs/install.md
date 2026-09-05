@@ -81,6 +81,6 @@ The image is `scratch` plus the binary. If your DSNs use TLS, mount a CA bundle
 
 - TCP to each node's MySQL port, and to the ProxySQL admin port if you use
   `--proxysql`.
-- An audit user with `USAGE, PROCESS, SELECT` — see
+- An audit user with `USAGE, PROCESS, SELECT, REPLICATION CLIENT` — see
   [permissions and safety](safety.md).
 - A writable path for `--state`, if you want rates instead of lifetime totals.
