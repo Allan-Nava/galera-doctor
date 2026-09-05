@@ -6,6 +6,26 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.1.1] - 2026-09-05
+
+### Added
+
+- **The findings contract is frozen and written down** (GD-58) — the half of
+  GD-19 that lives in this repository. `--findings` is the interface another
+  tool consumes, so [docs/findings.md](docs/findings.md) states it as a promise:
+  the array is an array (`[]`, never `null`), worst first with `ERROR` above
+  `BAD`, a number lives in `value`/`unit` and never only in prose, and no DSN
+  appears in any field.
+
+  A test compares the whole document rather than a field at a time. When it
+  fails the question is not how to make it pass — it is whether this is a
+  breaking change to a published interface, and therefore whether it belongs in
+  a major release. Adding an optional field is not, and does not.
+
+  Nothing about the output changed: the test passed the moment it was written,
+  which is the point of writing it before anyone depends on the output more
+  than they already do.
+
 ## [1.1.0] - 2026-09-05
 
 ### Added

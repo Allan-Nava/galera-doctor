@@ -58,7 +58,7 @@ quotes a DSN is redacted first.
 | `--no-schema` | off | skip the primary key check |
 | `--flow-warn F` / `--flow-bad F` | `0.01` / `0.10` | flow-control share of the interval |
 | `--ist-warn D` | `30m` | gcache window below which a restart means a full SST |
-| `--json` / `--findings` | — | full report / flat findings array |
+| `--json` / `--findings` | — | full report / flat findings array ([the contract](findings.md)) |
 | `--min-severity S` | — | hide findings below `S` |
 | `--exit-on S` | never | exit 1 when a finding reaches `S` |
 | `--watch D` | off | re-audit every `D` and print only the transitions |

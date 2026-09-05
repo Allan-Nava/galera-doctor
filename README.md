@@ -243,7 +243,7 @@ attestation (`gh attestation verify`), built by the tag itself. See
 |---|---|
 | *(none)* | text, worst cluster first, hint on its own line |
 | `--json` | everything |
-| `--findings` | the flat findings array the sibling tools speak — empty array, never `null` |
+| `--findings` | the flat findings array the sibling tools speak — empty array, never `null`; [the contract](docs/findings.md) |
 | `--min-severity S` | hide findings below `S`; the cluster header stays |
 | `--watch D` | the first report in full, then only what changed, every `D` |
 

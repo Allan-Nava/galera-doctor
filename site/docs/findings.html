@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The findings contract — galera-doctor</title>
+<meta name="description" content="The findings contract — galera-doctor, a read-only audit of a MariaDB/MySQL Galera cluster.">
+<link rel="canonical" href="https://allan-nava.github.io/galera-doctor/docs/findings.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" href="../mark.svg" type="image/svg+xml">
+<meta property="og:title" content="The findings contract — galera-doctor">
+<meta property="og:description" content="galera-doctor: the Galera states no wsrep_* counter can show you.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://allan-nava.github.io/galera-doctor/docs/findings.html">
+<meta property="og:image" content="https://allan-nava.github.io/galera-doctor/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<nav>
+  <a class="home" href="../"><img src="../mark.svg" alt="" width="26" height="26"> galera-doctor</a>
+  <a href="https://github.com/Allan-Nava/galera-doctor">GitHub</a>
+</nav>
+<main>
+<h1>The findings contract</h1>
+<p>
+<code>--findings</code> emits a flat JSON array of findings. It is the interface another tool consumes — <a href="https://github.com/Allan-Nava/checkfleet">checkfleet</a> emits the same findings under a <code>galera</code> module — so this page describes it as a promise rather than as a description of what the code happens to do today.
+</p>
+<pre><code>
+$ galera-doctor audit --config clusters.json --findings --min-severity WARN
+</code></pre>
+<pre><code>
+[
+  {
+    "check": "flow/paused",
+    "target": "sg-01",
+    "status": "WARN",
+    "message": "flow-controlled 2.10% of the last 10m0s",
+    "value": 42.5,
+    "unit": "percent",
+    "hint": "this node is intermittently the slowest in the cluster"
+  }
+]
+</code></pre>
+<h2 id="the-fields">The fields</h2>
+<div class="scroll"><table><thead><tr>
+<th>Field</th>
+<th>Type</th>
+<th>Always present</th>
+<th>What it is</th>
+</tr></thead><tbody>
+<tr>
+<td><code>check</code></td>
+<td>string</td>
+<td>yes</td>
+<td>the analysis that produced it — <code>flow/paused</code>, <code>systables/drift</code>, … The list is <code>galera-doctor checks</code></td>
+</tr>
+<tr>
+<td><code>target</code></td>
+<td>string</td>
+<td>yes</td>
+<td>what was looked at: a node name, a table, or the cluster name</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>yes</td>
+<td><code>OK</code>, <code>WARN</code>, <code>BAD</code> or <code>ERROR</code>, in that severity order</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>string</td>
+<td>yes</td>
+<td>the measurement, in a sentence. <strong>Prose: never parse it</strong></td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td>number</td>
+<td>no</td>
+<td>the number behind the finding, when there is one</td>
+</tr>
+<tr>
+<td><code>unit</code></td>
+<td>string</td>
+<td>no</td>
+<td>what <code>value</code> counts: <code>seconds</code>, <code>bytes</code>, <code>tables</code>, <code>nodes</code>, …</td>
+</tr>
+<tr>
+<td><code>hint</code></td>
+<td>string</td>
+<td>no</td>
+<td>what it means for whoever is on call</td>
+</tr>
+</tbody></table></div>
+<h2 id="the-promises">The promises</h2>
+<ul>
+<li><strong>The array is an array.</strong> A run with nothing to report emits <code>[]</code>, never <code>null</code>. A consumer iterating it does not have to special-case a healthy cluster.</li>
+<li><strong>Worst first.</strong> <code>ERROR</code>, then <code>BAD</code>, <code>WARN</code>, <code>OK</code>. Taking the first element takes the most severe finding, and that is intended rather than an accident of ordering.</li>
+<li><strong><code>ERROR</code> sorts above <code>BAD</code></strong> because nothing below it can be concluded: a node that was not read is not a node that is healthy.</li>
+<li><strong>A number lives in <code>value</code>, never only in <code>message</code>.</strong> The message is written for a person and its wording changes; the pair <code>value</code>/<code>unit</code> is what a machine reads.</li>
+<li><strong>A DSN never appears</strong> in any field. Nodes are identified by name and driver errors are redacted, because findings end up in tickets.</li>
+<li><strong>Exit status is not severity.</strong> The process exits <code>0</code> whenever the audit ran, whatever it found; <code>1</code> only with <code>--exit-on</code>, and <code>2</code> for a usage error. See <a href="usage.html#exit-status">exit status</a>.</li>
+</ul>
+<h2 id="changing-it">Changing it</h2>
+<p>
+The field names above are frozen by a test that compares the whole document (<code>TestTheFindingsContractIsFrozen</code>). When that test fails the question is not how to make it pass: it is whether this is a breaking change to a published interface, and therefore whether it belongs in a major release.
+</p>
+<p>
+Adding an <strong>optional</strong> field is not a breaking change and does not need one.
+</p>
+</main>
+<footer>
+  <a href="../">galera-doctor</a> ·
+  <a href="https://github.com/Allan-Nava/galera-doctor/blob/main/docs/findings.md">this page on GitHub</a> ·
+  MIT
+</footer>
+</body>
+</html>

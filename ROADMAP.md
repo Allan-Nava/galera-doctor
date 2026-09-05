@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**57 items · 53 shipped · 4 open · 9 milestones.**
+**58 items · 54 shipped · 4 open · 9 milestones.**
 
 ## At a glance
 
@@ -19,7 +19,7 @@
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | shipped | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
 | **M7** — Every write path, drawn or not | `v1.0.0` | shipped | `##########` 100% | 0 | 7 |
-| **M8** — Parked, and why | `v2.0.0` | later | `..........` 0% | 3 | 0 |
+| **M8** — Parked, and why | `v2.0.0` | later | `###.......` 25% | 3 | 1 |
 | **M9** — Beyond Galera | `v2.0.0` | later | `#####.....` 50% | 1 | 1 |
 
 ## Next up
@@ -133,13 +133,14 @@ Target `v1.0.0` · shipped · 0 open · 7 shipped · `##########` 100%
 
 ### M8 — Parked, and why
 
-Target `v2.0.0` · later · 3 open · 0 shipped · `..........` 0%
+Target `v2.0.0` · later · 3 open · 1 shipped · `###.......` 25%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
 | **GD-14** — Backup freshness | high | M | check | open |
 | **GD-19** — checkfleet module | high | M | integration | open |
 | **GD-15** — SST/IST history | med | L | check | open |
+| **GD-58** — The findings contract, frozen | high | S | output,docs | shipped `1.1.1` |
 
 ### M9 — Beyond Galera
 
@@ -159,8 +160,8 @@ Target `v2.0.0` · later · 1 open · 1 shipped · `#####.....` 50%
 | `cli` | 2 | 0 |
 | `collect` | 4 | 0 |
 | `delivery` | 2 | 0 |
-| `docs` | 4 | 0 |
-| `output` | 3 | 0 |
+| `docs` | 5 | 0 |
+| `output` | 4 | 0 |
 | `project` | 3 | 0 |
 | `proxysql` | 2 | 0 |
 | `release` | 5 | 0 |

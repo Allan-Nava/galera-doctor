@@ -363,6 +363,13 @@ six months. Each one names the form in which it *would* earn its place.
   here**: the code lives in that repository, and what this one owes it is the
   stable `--findings` array it already emits.
   <!-- gd: prio=high size=M labels=integration -->
+- [x] **GD-58 — The findings contract, frozen**: the half of GD-19 that lives
+  in this repository. `--findings` is what another tool consumes, so the field
+  names are pinned by a test that compares the whole document, and
+  [docs/findings.md](docs/findings.md) states the promises — array never
+  `null`, worst first, numbers in `value` rather than in prose, no DSN in any
+  field — with the rule that breaking them is a major release.
+  <!-- gd: prio=high size=S labels=output,docs ver=1.1.1 -->
 
 ## M9 — Beyond Galera <!-- ms: target=v2.0.0 phase=later -->
 

@@ -231,3 +231,101 @@ func TestAnOKThatDisappearedIsNotNews(t *testing.T) {
 		t.Fatalf("an OK that stopped being reported is not a transition:\n%s", b.String())
 	}
 }
+
+// GD-19 — the --findings contract, frozen.
+//
+// This array is what another tool consumes: checkfleet emits the same findings
+// under a `galera` module, and anything else that parses this output does so
+// against these key names. A renamed field, a `null` where an array was
+// promised, or a number that turns into a string breaks a consumer silently —
+// it does not fail here, it fails in somebody else's parser, later.
+//
+// So this test is deliberately literal: it compares the whole document. When
+// it fails, the question is not "how do I make the test pass" but "is this a
+// breaking change to a published contract, and does it belong in a major
+// release".
+func TestTheFindingsContractIsFrozen(t *testing.T) {
+	value := 42.5
+	reps := []audit.Report{{
+		Cluster: "compress", Nodes: []string{"sg-01"},
+		Findings: []finding.Finding{
+			{
+				Check: "flow/paused", Target: "sg-01", Status: finding.WARN,
+				Message: "flow-controlled 2.10% of the last 10m0s",
+				Value:   &value, Unit: "percent",
+				Hint: "this node is intermittently the slowest in the cluster",
+			},
+			{
+				Check: "cluster/size", Target: "compress", Status: finding.OK,
+				Message: "3 member(s), expected 3",
+			},
+		},
+	}}
+
+	var b bytes.Buffer
+	if err := Findings(&b, reps, ""); err != nil {
+		t.Fatal(err)
+	}
+	const want = `[
+  {
+    "check": "flow/paused",
+    "target": "sg-01",
+    "status": "WARN",
+    "message": "flow-controlled 2.10% of the last 10m0s",
+    "value": 42.5,
+    "unit": "percent",
+    "hint": "this node is intermittently the slowest in the cluster"
+  },
+  {
+    "check": "cluster/size",
+    "target": "compress",
+    "status": "OK",
+    "message": "3 member(s), expected 3"
+  }
+]
+`
+	if b.String() != want {
+		t.Fatalf("the published --findings contract changed.\n\ngot:\n%s\nwant:\n%s", b.String(), want)
+	}
+}
+
+// The one shape a consumer must never have to special-case: a healthy cluster.
+func TestAnEmptyFindingsArrayIsAnArray(t *testing.T) {
+	var b bytes.Buffer
+	if err := Findings(&b, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if b.String() != "[]\n" {
+		t.Fatalf("an empty run must emit [], not %q — a consumer iterating it should not have to check for null first", b.String())
+	}
+}
+
+// Worst first is part of the contract too: a consumer that takes the first
+// element is taking the most severe one, and that is documented behaviour
+// rather than an accident of map ordering.
+func TestTheFindingsArrayIsWorstFirst(t *testing.T) {
+	reps := []audit.Report{{Cluster: "c", Findings: []finding.Finding{
+		{Check: "a/ok", Target: "t", Status: finding.OK},
+		{Check: "b/bad", Target: "t", Status: finding.BAD},
+		{Check: "c/error", Target: "t", Status: finding.ERROR},
+		{Check: "d/warn", Target: "t", Status: finding.WARN},
+	}}}
+	var b bytes.Buffer
+	if err := Findings(&b, reps, ""); err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, f := range got {
+		order = append(order, f["status"].(string))
+	}
+	want := []string{"ERROR", "BAD", "WARN", "OK"}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("order = %v, want %v", order, want)
+		}
+	}
+}
