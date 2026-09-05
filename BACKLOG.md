@@ -386,3 +386,50 @@ have to be.
   pointing these checks at it would produce confident findings about variables
   that do not mean the same thing. It needs its own set, which is what this
   milestone is for. <!-- gd: prio=low size=XL labels=check -->
+
+## M10 — Divergence that has not happened yet <!-- ms: target=v1.3.0 phase=next -->
+
+Everything shipped so far reports a state the cluster is already in. These are
+the ones where it is not yet: a setting that will produce different rows the
+next time somebody runs a DDL, a transaction the certifier is going to abort, a
+node the group is already suspicious of. Each of them is a divergence with a
+date in the future, and none of them appears in a counter — because from
+replication's point of view nothing has gone wrong at all.
+
+- [ ] **GD-59 — `sql_mode` per node**: the setting that decides what a write
+  *means*. A DDL run on a node with `NO_ZERO_DATE` off produces a different
+  table from the same statement run on its peers, and an application talking to
+  the wrong node gets a truncation where it expected an error. Galera
+  replicates the result, not the interpretation, so nothing here is ever a
+  conflict. <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-60 — Character set and collation per node**:
+  `character_set_server` and `collation_server` differing means a `CREATE TABLE`
+  without an explicit charset is a different table depending on where it ran —
+  which is how `schema/drift` findings come to exist, so this is the cause next
+  to the symptom, the way `repl/osu-method` is for the other kind.
+  <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-61 — Time zone, per node**: `time_zone` differing, and whether the
+  zone tables are loaded at all. A `NOW()` in a trigger or a default, a
+  `CONVERT_TZ` in a view: same statement, different stored value, no conflict
+  and no counter. <!-- gd: prio=med size=S labels=check -->
+- [ ] **GD-62 — Cascading foreign keys**: parent-child cascades are certified
+  on the parent rows only, which is the documented weak spot of Galera's
+  certification. Report the cascading constraints in the application schemas —
+  the ones that turn one certified write into rows nobody certified.
+  <!-- gd: prio=med size=M labels=check,collect -->
+- [ ] **GD-63 — The transaction that is going to lose**:
+  `information_schema.INNODB_TRX` for transactions older than a threshold. On a
+  standalone server that is a slow query; in a cluster it is the next
+  brute-force abort, and it is what makes a rolling schema change hang, because
+  TOI waits for it cluster-wide. Different diagnosis, same row.
+  <!-- gd: prio=high size=M labels=check,collect -->
+- [ ] **GD-64 — The node the group already distrusts**: `wsrep_evs_delayed`
+  and the eviction list. The group communication layer keeps its own opinion
+  about which members are flaky, and with `evs.auto_evict` set it acts on it —
+  so a node named there is one the cluster is about to remove while every
+  membership check still reads Primary and Synced.
+  <!-- gd: prio=high size=S labels=check -->
+- [ ] **GD-65 — A state transfer in flight**: `wsrep_ist_receive_status` and
+  the donor's side of it. `node/state` says Donor/Desynced and Joined; this
+  says how far along it is and therefore whether waiting is the right thing to
+  do. <!-- gd: prio=low size=S labels=check -->
