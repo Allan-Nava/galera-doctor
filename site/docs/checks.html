@@ -283,6 +283,35 @@ The person reading this ran the audit twenty minutes ago and did something in be
 <p>
 A cluster that could not be read at all still carries its findings forward, so "the node came back" is a transition rather than a silence.
 </p>
+<h3 id="backup-freshness"><code>backup/freshness</code></h3>
+<p>
+Opt-in, and declared rather than guessed. This tool cannot see a dump on disk or an off-site destination — it speaks read-only SQL to the nodes — so what it grades is a query <strong>the operator writes</strong>, against the table their backups already record into:
+</p>
+<pre><code>
+"backup": {
+  "query": "SELECT MAX(finished_at) FROM ops.backups WHERE status = 'ok' AND offsite = 1",
+  "warn_after": "26h",
+  "bad_after": "50h"
+}
+</code></pre>
+<p>
+Both halves of the question fit in that <code>WHERE</code>: "the last backup that finished" and "the last one that reached the other building" are the same <code>SELECT</code>. Nothing here invents a schema, and nothing needs a second inventory of where the backups live.
+</p>
+<ul>
+<li>older than <code>warn_after</code> (default 26h) is <code>WARN</code>, older than <code>bad_after</code> (default 50h) is <code>BAD</code>;</li>
+<li><strong>no row</strong> is <code>BAD</code>, not silence: either no backup has ever completed, or it is not writing where the query looks;</li>
+<li>a query that could not run is <code>ERROR</code> — the rest of the report still stands;</li>
+<li>a timestamp in the future is a <code>WARN</code> about the clock rather than a fresh backup.</li>
+</ul>
+<p>
+The age is measured against the <strong>answering server's</strong> clock, for the same reason <a href="#nodeclock"><code>node/clock</code></a> compares the nodes with each other: a backup should not look late because the machine running the audit has drifted.
+</p>
+<p>
+The query is checked at load, where the mistake is made: it has to be a single <code>SELECT</code>, with no <code>;</code> in it. A configuration file cannot smuggle a write past a tool whose whole promise is that it does not write — and the run-time gate refuses it a second time anyway.
+</p>
+<p>
+Without the block the check is silent, and <a href="#auditcoverage"><code>audit/coverage</code></a> does not count it as a gap: nothing was denied. It runs even when the cluster is not a cluster — a broken cluster is when the age of the backup matters most.
+</p>
 <h3 id="audit-coverage"><code>audit/coverage</code></h3>
 <p>
 One line saying what this run could <strong>not</strong> audit: a node that could not be read, a missing <code>information_schema</code> grant, a clock that did not answer, a missing baseline.

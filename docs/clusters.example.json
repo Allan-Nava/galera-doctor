@@ -7,7 +7,12 @@
         {"name": "node-03", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.0.0.3:3306)/"}
       ],
       "proxysql_dsn": "admin:${PROXYSQL_ADMIN_PASS}@tcp(10.0.0.9:6032)/",
-      "expect_nodes": 3
+      "expect_nodes": 3,
+      "backup": {
+        "query": "SELECT MAX(finished_at) FROM ops.backups WHERE status = 'ok' AND offsite = 1",
+        "warn_after": "26h",
+        "bad_after": "50h"
+      }
     }
   }
 }

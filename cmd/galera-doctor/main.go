@@ -140,6 +140,7 @@ func cmdChecks() int {
 		{"node/restarted", "a node that came back between two runs (needs --state)"},
 		{"cluster/membership-view", "the group's own member list against the nodes audited"},
 		{"pxc/strict-mode", "Percona's guard rail: the node that accepts what its peers refuse"},
+		{"backup/freshness", "the backup query this cluster declared, graded (needs a config block)"},
 		{"audit/changes", "what appeared, cleared or got worse since the last run (needs --state)"},
 		{"proxysql/*", "the proxy's view against the cluster's (needs --proxysql)"},
 		{"proxysql/monitor", "a proxy whose Galera monitor stopped: the hostgroups are a photograph"},
@@ -278,6 +279,21 @@ func cmdAudit(args []string) int {
 			o.ExpectNodes = c.ExpectNodes
 			if *expect != 0 {
 				o.ExpectNodes = *expect
+			}
+			// The backup query, when this cluster declared one (GD-14). It
+			// runs against the first node that answers: the table is
+			// replicated like any other, so any member can be asked.
+			if c.Backup != nil {
+				b := collector.AskBackup(ctx, c.Nodes, c.Backup.Query)
+				o.Backup = &audit.BackupResult{
+					Configured: true,
+					Node:       b.Node,
+					At:         b.At,
+					Now:        b.Now,
+					Err:        b.Err,
+					Warn:       c.Backup.WarnAfter(),
+					Bad:        c.Backup.BadAfter(),
+				}
 			}
 			// The state file namespaces everything by cluster; the audit asks
 			// about bare node names, so it gets this cluster's view of it.

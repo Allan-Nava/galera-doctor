@@ -43,6 +43,31 @@ nodes.
 A DSN is never printed. Findings identify nodes by name, and a driver error that
 quotes a DSN is redacted first.
 
+## Asking about backups
+
+A cluster may declare a query that says when its last backup finished. It is
+optional, it is graded by [`backup/freshness`](checks.md#backupfreshness), and
+the query is yours:
+
+```json
+{
+  "clusters": {
+    "compress": {
+      "nodes": [{"name": "sg-01", "dsn": "audit:${GALERA_DOCTOR_PASS}@tcp(10.11.1.5:3306)/"}],
+      "backup": {
+        "query": "SELECT MAX(finished_at) FROM ops.backups WHERE status = 'ok' AND offsite = 1",
+        "warn_after": "26h",
+        "bad_after": "50h"
+      }
+    }
+  }
+}
+```
+
+The query has to be a single `SELECT` returning one value — a `DATETIME`, a
+`DATE`, an RFC 3339 timestamp or a Unix epoch — and that is checked when the
+config is read, not when it is sent.
+
 ## Flags
 
 | Flag | Default | What it does |

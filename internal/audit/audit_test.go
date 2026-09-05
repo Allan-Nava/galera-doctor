@@ -140,6 +140,8 @@ func pxc() []cluster.Snapshot {
 	return snaps
 }
 
+func ptrTime(t time.Time) *time.Time { return &t }
+
 func opts() Options {
 	o := DefaultOptions()
 	o.Cluster = "compress"
@@ -2293,5 +2295,128 @@ func TestPXCIsStillAuditedLikeAnyCluster(t *testing.T) {
 	f := one(t, rep, "cluster/uuid")
 	if f.Status != finding.BAD {
 		t.Fatalf("a split brain is a split brain whatever the flavour: %+v", f)
+	}
+}
+
+// GD-14 — backup freshness, graded against the server's own clock.
+//
+// The tool cannot see a dump on disk. It grades a query the operator declared,
+// against the table their backups already write into — and it compares the
+// timestamp with the *server's* clock rather than this host's, for the same
+// reason node/clock compares the nodes with each other.
+func TestAFreshBackupIsOK(t *testing.T) {
+	o := opts()
+	o.Backup = &BackupResult{
+		Configured: true, Node: "sg-01",
+		At:   ptrTime(now.Add(-3 * time.Hour)),
+		Warn: 26 * time.Hour, Bad: 50 * time.Hour,
+	}
+	f := one(t, Run(threeHealthy(), nil, o), "backup/freshness")
+	if f.Status != finding.OK {
+		t.Fatalf("status = %s, want OK: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "3h") {
+		t.Fatalf("the age is the measurement: %q", f.Message)
+	}
+	if f.Value == nil || *f.Value < 10700 || *f.Value > 10900 {
+		t.Fatalf("the value has to be the age in seconds: %v", f.Value)
+	}
+}
+
+func TestALateBackupWarns(t *testing.T) {
+	o := opts()
+	o.Backup = &BackupResult{Configured: true, Node: "sg-01",
+		At: ptrTime(now.Add(-30 * time.Hour)), Warn: 26 * time.Hour, Bad: 50 * time.Hour}
+	f := one(t, Run(threeHealthy(), nil, o), "backup/freshness")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+}
+
+func TestAMissedBackupIsBad(t *testing.T) {
+	o := opts()
+	o.Backup = &BackupResult{Configured: true, Node: "sg-01",
+		At: ptrTime(now.Add(-60 * time.Hour)), Warn: 26 * time.Hour, Bad: 50 * time.Hour}
+	f := one(t, Run(threeHealthy(), nil, o), "backup/freshness")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Hint, "restore") && !strings.Contains(f.Hint, "recover") {
+		t.Fatalf("the hint has to say what is at stake: %q", f.Hint)
+	}
+}
+
+// No row is not "no backup yet, probably fine": it is a query that found
+// nothing where a backup should have been recorded.
+func TestABackupQueryThatFoundNothingIsBad(t *testing.T) {
+	o := opts()
+	o.Backup = &BackupResult{Configured: true, Node: "sg-01", Warn: 26 * time.Hour, Bad: 50 * time.Hour}
+	f := one(t, Run(threeHealthy(), nil, o), "backup/freshness")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "no row") && !strings.Contains(f.Message, "nothing") {
+		t.Fatalf("say what happened: %q", f.Message)
+	}
+}
+
+// A query that could not run is an ERROR, like every other read this tool
+// could not make — and the audit still stands on everything else.
+func TestABackupQueryThatFailedIsAnError(t *testing.T) {
+	o := opts()
+	o.Backup = &BackupResult{Configured: true, Node: "sg-01",
+		Err: "Error 1146: Table 'ops.backups' doesn't exist", Warn: time.Hour, Bad: 2 * time.Hour}
+	f := one(t, Run(threeHealthy(), nil, o), "backup/freshness")
+	if f.Status != finding.ERROR {
+		t.Fatalf("status = %s, want ERROR: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "ops.backups") {
+		t.Fatalf("the server's error is the useful half: %q", f.Message)
+	}
+}
+
+// Not configured is silence: this is an opt-in check, and a cluster that never
+// declared a backup query has not failed anything.
+func TestNoBackupQueryIsSilence(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "backup/freshness"); len(fs) != 0 {
+		t.Fatalf("an opt-in check must not fire when it was not opted into: %+v", fs)
+	}
+	// And coverage does not call it a gap: nothing was denied.
+	f := one(t, rep, "audit/coverage")
+	if strings.Contains(f.Message, "backup") {
+		t.Fatalf("a check nobody configured is not a gap: %q", f.Message)
+	}
+}
+
+// The backup check does not depend on the cluster being a cluster. If anything
+// the opposite: a broken cluster is exactly when somebody wants to know how
+// old the backup is, and that question was asked explicitly in the config.
+func TestTheBackupCheckRunsEvenWhenNothingIsACluster(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		delete(snaps[i].Vars, "wsrep_provider")
+	}
+	o := opts()
+	o.Backup = &BackupResult{Configured: true, Node: "sg-01",
+		At: ptrTime(now.Add(-60 * time.Hour)), Warn: 26 * time.Hour, Bad: 50 * time.Hour}
+
+	rep := Run(snaps, nil, o)
+	f := one(t, rep, "backup/freshness")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+}
+
+// And when no node could be read at all: the query could not have run either,
+// so the finding says that rather than saying nothing.
+func TestTheBackupCheckSurvivesAnUnreadableCluster(t *testing.T) {
+	o := opts()
+	o.Backup = &BackupResult{Configured: true, Node: "sg-01",
+		Err: "dial tcp: i/o timeout", Warn: time.Hour, Bad: 2 * time.Hour}
+	rep := Run([]cluster.Snapshot{{Node: "sg-01", At: now, Err: "dial tcp: i/o timeout"}}, nil, o)
+	f := one(t, rep, "backup/freshness")
+	if f.Status != finding.ERROR {
+		t.Fatalf("status = %s, want ERROR: %+v", f.Status, f)
 	}
 }

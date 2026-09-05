@@ -50,7 +50,30 @@ type Options struct {
 	// threshold here is about the cluster rather than about this machine's NTP.
 	ClockWarn time.Duration
 	ClockBad  time.Duration
-	Now       time.Time
+	// Backup is what the operator's backup query returned, when one was
+	// declared. nil is "not configured", which is silence rather than a gap:
+	// nothing was denied (GD-14).
+	Backup *BackupResult
+	Now    time.Time
+}
+
+// BackupResult is one answer to the question the configuration asked. The
+// audit grades it; running the query belongs to the caller, which is the only
+// part of this that needs a connection.
+type BackupResult struct {
+	Configured bool
+	// Node is who answered, so a finding can say where the number came from.
+	Node string
+	// At is when the last backup finished, nil when the query returned no row
+	// — which is a different statement from "an old backup".
+	At *time.Time
+	// Now is the answering server's clock, so the age is measured the way
+	// node/clock measures skew: against the server, not against this host.
+	// Zero falls back to the audit's own clock.
+	Now  time.Time
+	Err  string
+	Warn time.Duration
+	Bad  time.Duration
 }
 
 // DefaultOptions are the thresholds used when a caller passes none.
@@ -104,6 +127,11 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	// to be comparable — otherwise "the node came back" is a transition nobody
 	// reports.
 	finish := func() Report {
+		// The backup question was asked explicitly in the configuration and
+		// does not depend on the cluster being a cluster — if anything the
+		// opposite, since a broken cluster is when somebody most wants to know
+		// how old the backup is. So it runs on every path out of here.
+		add(backupFreshness(rep.Cluster, opt)...)
 		add(changes(rep.Cluster, rep.Findings, prev, opt.Now)...)
 		rep.State.Findings = carry(rep.Findings)
 		finding.SortWorstFirst(rep.Findings)
@@ -2481,6 +2509,76 @@ func strictMode(name string, live []cluster.Snapshot) []finding.Finding {
 		}}
 	}
 	return nil
+}
+
+// backupFreshness grades the backup query the configuration declared (GD-14).
+//
+// This tool cannot see a dump on disk or an off-site destination: it speaks
+// read-only SQL to the nodes. What it can do is grade a query the operator
+// wrote against the table their backups already record into — so nothing here
+// invents a schema, both halves of the question fit in one WHERE ("finished"
+// and "reached the other building"), and the read-only gate guarantees the
+// configuration cannot smuggle a write.
+//
+// The age is measured against the answering server's clock. Comparing with
+// this host's would make a backup look late because the machine running the
+// audit has drifted, which is precisely the mistake node/clock exists to
+// catch.
+func backupFreshness(name string, opt Options) []finding.Finding {
+	b := opt.Backup
+	if b == nil || !b.Configured {
+		return nil
+	}
+	where := "the backup query"
+	if b.Node != "" {
+		where = "the backup query on " + b.Node
+	}
+
+	if b.Err != "" {
+		return []finding.Finding{{
+			Check: "backup/freshness", Target: name, Status: finding.ERROR,
+			Message: where + " could not run: " + b.Err,
+			Hint:    "nothing was learned about the backups — the rest of this report still stands, but this part of it was not audited",
+		}}
+	}
+	if b.At == nil {
+		return []finding.Finding{{
+			Check: "backup/freshness", Target: name, Status: finding.BAD,
+			Message: where + " returned no row: nothing has been recorded",
+			Hint:    "either no backup has ever completed, or it is not writing where the query looks — both are worth finding out before a restore is needed",
+		}}
+	}
+
+	now := b.Now
+	if now.IsZero() {
+		now = opt.Now
+	}
+	age := now.Sub(*b.At)
+	status := finding.OK
+	switch {
+	case age >= b.Bad:
+		status = finding.BAD
+	case age >= b.Warn:
+		status = finding.WARN
+	}
+	f := finding.Finding{
+		Check: "backup/freshness", Target: name, Status: status,
+		Message: fmt.Sprintf("the last backup finished %s ago, at %s (%s)",
+			age.Round(time.Minute), b.At.Format(time.RFC3339), where),
+		Value: finding.Num(age.Seconds()), Unit: "seconds",
+	}
+	if status != finding.OK {
+		f.Hint = fmt.Sprintf("older than the %s this cluster declared: whatever is being restored from, it is at least %s behind the data — and a backup nobody noticed stopping is the one that matters",
+			b.Warn, age.Round(time.Hour))
+	}
+	// A backup in the future is a clock problem, not a fresh backup.
+	if age < 0 {
+		f.Status = finding.WARN
+		f.Message = fmt.Sprintf("the last backup is dated %s ago in the future, at %s (%s)",
+			(-age).Round(time.Minute), b.At.Format(time.RFC3339), where)
+		f.Hint = "the recorded time is ahead of the server's own clock: check node/clock in this report, and what writes that column"
+	}
+	return []finding.Finding{f}
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.

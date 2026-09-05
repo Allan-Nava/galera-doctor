@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Allan-Nava/galera-doctor/internal/cluster"
 )
@@ -26,7 +27,37 @@ type Cluster struct {
 	// ExpectNodes is the membership the cluster should report. 0 means "as many
 	// as are listed here".
 	ExpectNodes int `json:"expect_nodes,omitempty"`
+	// Backup declares how to ask this cluster when its last backup finished.
+	// Optional: without it the check is skipped rather than guessed at.
+	Backup *Backup `json:"backup,omitempty"`
 }
+
+// Backup is a query the operator writes and two thresholds (GD-14).
+//
+// This tool cannot see a dump on disk or an off-site destination — it speaks
+// read-only SQL to the nodes. What it can do is grade a query against whatever
+// table the backups already record into, which is why the query is declared
+// here instead of a schema being invented. Both halves of the question fit in
+// it: "the last backup that finished" and "the last one that reached the other
+// building" are the same SELECT with a different WHERE.
+//
+// The query is checked at load against the same rule the query gate enforces
+// at run time. A configuration file cannot smuggle a write past a tool whose
+// whole promise is that it does not write.
+type Backup struct {
+	Query string `json:"query"`
+	// Warn and Bad are durations as Go writes them — "26h", "2h30m". The
+	// defaults suit a daily backup with slack: a run that is a couple of hours
+	// late is not an incident, and one that missed a whole day is.
+	Warn string `json:"warn_after,omitempty"`
+	Bad  string `json:"bad_after,omitempty"`
+
+	warn, bad time.Duration
+}
+
+// WarnAfter and BadAfter are the parsed thresholds, defaulted.
+func (b *Backup) WarnAfter() time.Duration { return b.warn }
+func (b *Backup) BadAfter() time.Duration  { return b.bad }
 
 // File is the whole configuration.
 type File struct {
@@ -78,6 +109,11 @@ func Load(path string) (File, error) {
 			}
 			c.Nodes[i].DSN = expanded
 		}
+		if c.Backup != nil {
+			if err := c.Backup.validate(); err != nil {
+				return f, fmt.Errorf("%s: cluster %q backup: %w", path, name, err)
+			}
+		}
 		if c.ProxySQLDSN != "" {
 			expanded, err := expand(c.ProxySQLDSN)
 			if err != nil {
@@ -88,6 +124,67 @@ func Load(path string) (File, error) {
 		f.Clusters[name] = c
 	}
 	return f, nil
+}
+
+const (
+	defaultBackupWarn = 26 * time.Hour
+	defaultBackupBad  = 50 * time.Hour
+)
+
+func (b *Backup) validate() error {
+	if strings.TrimSpace(b.Query) == "" {
+		return fmt.Errorf("no query: give the SELECT that returns when the last backup finished")
+	}
+	// The same rule cluster.Query enforces at run time, applied where the
+	// mistake is made. A config that cannot write is easier to trust than a
+	// config that is stopped later.
+	q := strings.TrimSpace(b.Query)
+	if !cluster.ReadOnly(q) || !strings.EqualFold(strings.Fields(q)[0], "SELECT") {
+		return fmt.Errorf("the query has to be a SELECT that returns when the last backup finished, got %q", firstWords(q))
+	}
+	// One statement. The driver disables multi-statement by default, but a DSN
+	// can turn it on, and a configuration file must not be a way to send a
+	// second statement past a tool whose whole promise is that it does not
+	// write. A semicolon inside a string literal is refused too: being strict
+	// here costs somebody a rewritten WHERE, and being loose costs the promise.
+	if strings.Contains(strings.TrimSuffix(q, ";"), ";") {
+		return fmt.Errorf("the query has to be a single statement, with no %q in it", ";")
+	}
+	b.warn, b.bad = defaultBackupWarn, defaultBackupBad
+	if b.Warn != "" {
+		d, err := time.ParseDuration(b.Warn)
+		if err != nil {
+			return fmt.Errorf("warn_after %q: %w", b.Warn, err)
+		}
+		b.warn = d
+		// A bad_after that was not given follows the warning rather than
+		// staying at a default that might now be lower than it.
+		if b.Bad == "" && b.bad < b.warn {
+			b.bad = 2 * b.warn
+		}
+	}
+	if b.Bad != "" {
+		d, err := time.ParseDuration(b.Bad)
+		if err != nil {
+			return fmt.Errorf("bad_after %q: %w", b.Bad, err)
+		}
+		b.bad = d
+	}
+	if b.warn <= 0 || b.bad <= 0 {
+		return fmt.Errorf("thresholds have to be positive, got warn_after %s and bad_after %s", b.warn, b.bad)
+	}
+	if b.bad < b.warn {
+		return fmt.Errorf("bad_after (%s) is shorter than warn_after (%s): nothing would ever be graded WARN", b.bad, b.warn)
+	}
+	return nil
+}
+
+func firstWords(q string) string {
+	f := strings.Fields(q)
+	if len(f) > 4 {
+		f = f[:4]
+	}
+	return strings.Join(f, " ")
 }
 
 func expand(s string) (string, error) {

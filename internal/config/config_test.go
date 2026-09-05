@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, body string) string {
@@ -14,6 +15,22 @@ func write(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// load writes a config and reads it back, which is what most of these tests
+// mean by "this configuration".
+func load(t *testing.T, body string) (File, error) {
+	t.Helper()
+	return Load(write(t, body))
+}
+
+func mustLoad(t *testing.T, body string) File {
+	t.Helper()
+	f, err := load(t, body)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return f
 }
 
 func TestLoadExpandsEnvironmentReferences(t *testing.T) {
@@ -70,5 +87,103 @@ func TestNamesAreSorted(t *testing.T) {
 	got := f.Names()
 	if got[0] != "compress" || got[1] != "sslazio" {
 		t.Fatalf("names = %v, want sorted", got)
+	}
+}
+
+// GD-14 — backup freshness, declared rather than guessed.
+//
+// A dump on disk is not a backup that left the building, and this tool cannot
+// see either: it speaks read-only SQL to the nodes. What it can do is grade a
+// query *the operator writes*, against a table their backups already record
+// into — so nothing here invents a schema, and the read-only gate still
+// guarantees the query cannot write.
+func TestBackupBlockIsParsed(t *testing.T) {
+	f := mustLoad(t, `{
+	  "clusters": {
+	    "compress": {
+	      "nodes": [{"name": "sg-01", "dsn": "u:p@tcp(h:3306)/"}],
+	      "backup": {
+	        "query": "SELECT MAX(finished_at) FROM ops.backups WHERE status = 'ok' AND offsite = 1",
+	        "warn_after": "26h",
+	        "bad_after": "50h"
+	      }
+	    }
+	  }
+	}`)
+	c := f.Clusters["compress"]
+	if c.Backup == nil {
+		t.Fatal("the backup block was dropped")
+	}
+	if !strings.HasPrefix(c.Backup.Query, "SELECT MAX(finished_at)") {
+		t.Fatalf("query = %q", c.Backup.Query)
+	}
+	if c.Backup.WarnAfter() != 26*time.Hour || c.Backup.BadAfter() != 50*time.Hour {
+		t.Fatalf("thresholds = %s / %s", c.Backup.WarnAfter(), c.Backup.BadAfter())
+	}
+}
+
+// Defaults that suit a daily backup, so the common case needs two lines rather
+// than four.
+func TestBackupThresholdsHaveDefaults(t *testing.T) {
+	f := mustLoad(t, `{"clusters": {"c": {
+	  "nodes": [{"name": "n", "dsn": "u:p@tcp(h:3306)/"}],
+	  "backup": {"query": "SELECT MAX(t) FROM b"}
+	}}}`)
+	b := f.Clusters["c"].Backup
+	if b.WarnAfter() != 26*time.Hour || b.BadAfter() != 50*time.Hour {
+		t.Fatalf("defaults = %s / %s", b.WarnAfter(), b.BadAfter())
+	}
+}
+
+func TestABackupBlockWithoutAQueryIsRejected(t *testing.T) {
+	if _, err := load(t, `{"clusters": {"c": {
+	  "nodes": [{"name": "n", "dsn": "u:p@tcp(h:3306)/"}],
+	  "backup": {"warn_after": "26h"}
+	}}}`); err == nil {
+		t.Fatal("a backup block with nothing to run is a configuration error")
+	}
+}
+
+// A duration nobody can parse must fail at load, not silently become zero —
+// which would grade every backup as overdue.
+func TestABadBackupDurationIsRejected(t *testing.T) {
+	_, err := load(t, `{"clusters": {"c": {
+	  "nodes": [{"name": "n", "dsn": "u:p@tcp(h:3306)/"}],
+	  "backup": {"query": "SELECT 1", "warn_after": "twenty six hours"}
+	}}}`)
+	if err == nil {
+		t.Fatal("an unparseable duration must be a configuration error")
+	}
+	if !strings.Contains(err.Error(), "warn_after") {
+		t.Fatalf("the error must name the field: %v", err)
+	}
+}
+
+// Thresholds that are the wrong way round grade nothing correctly and would
+// never be noticed.
+func TestBackupThresholdsHaveToBeInOrder(t *testing.T) {
+	if _, err := load(t, `{"clusters": {"c": {
+	  "nodes": [{"name": "n", "dsn": "u:p@tcp(h:3306)/"}],
+	  "backup": {"query": "SELECT 1", "warn_after": "50h", "bad_after": "26h"}
+	}}}`); err == nil {
+		t.Fatal("bad_after must be at least warn_after")
+	}
+}
+
+// The query is the operator's, so it is checked at load against the same rule
+// the query gate enforces at run time: a config cannot smuggle a write past a
+// tool whose whole promise is that it does not write.
+func TestAWritingBackupQueryIsRejectedAtLoad(t *testing.T) {
+	for _, q := range []string{
+		"DELETE FROM ops.backups",
+		"UPDATE ops.backups SET status = 'ok'",
+		"SELECT 1; DROP TABLE ops.backups",
+	} {
+		if _, err := load(t, `{"clusters": {"c": {
+		  "nodes": [{"name": "n", "dsn": "u:p@tcp(h:3306)/"}],
+		  "backup": {"query": "`+q+`"}
+		}}}`); err == nil {
+			t.Fatalf("a backup query that writes must be refused at load: %q", q)
+		}
 	}
 }

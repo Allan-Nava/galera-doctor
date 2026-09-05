@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**58 items · 54 shipped · 4 open · 9 milestones.**
+**58 items · 55 shipped · 3 open · 9 milestones.**
 
 ## At a glance
 
@@ -19,7 +19,7 @@
 | **M5** — The cluster you cannot see from one node | `v0.3.0` | shipped | `##########` 100% | 0 | 7 |
 | **M6** — Configured, and not running | `v0.6.0` | shipped | `##########` 100% | 0 | 6 |
 | **M7** — Every write path, drawn or not | `v1.0.0` | shipped | `##########` 100% | 0 | 7 |
-| **M8** — Parked, and why | `v2.0.0` | later | `###.......` 25% | 3 | 1 |
+| **M8** — Parked, and why | `v2.0.0` | later | `#####.....` 50% | 2 | 2 |
 | **M9** — Beyond Galera | `v2.0.0` | later | `#####.....` 50% | 1 | 1 |
 
 ## Next up
@@ -133,13 +133,13 @@ Target `v1.0.0` · shipped · 0 open · 7 shipped · `##########` 100%
 
 ### M8 — Parked, and why
 
-Target `v2.0.0` · later · 3 open · 1 shipped · `###.......` 25%
+Target `v2.0.0` · later · 2 open · 2 shipped · `#####.....` 50%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-14** — Backup freshness | high | M | check | open |
 | **GD-19** — checkfleet module | high | M | integration | open |
 | **GD-15** — SST/IST history | med | L | check | open |
+| **GD-14** — Backup freshness, declared not guessed | high | M | check,cli | shipped `1.2.0` |
 | **GD-58** — The findings contract, frozen | high | S | output,docs | shipped `1.1.1` |
 
 ### M9 — Beyond Galera
@@ -155,9 +155,9 @@ Target `v2.0.0` · later · 1 open · 1 shipped · `#####.....` 50%
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 35 | 3 |
+| `check` | 35 | 2 |
 | `integration` | 1 | 1 |
-| `cli` | 2 | 0 |
+| `cli` | 3 | 0 |
 | `collect` | 4 | 0 |
 | `delivery` | 2 | 0 |
 | `docs` | 5 | 0 |

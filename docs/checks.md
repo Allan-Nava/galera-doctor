@@ -349,6 +349,47 @@ severity, and counting them twice makes one incident look like two.
 A cluster that could not be read at all still carries its findings forward, so
 "the node came back" is a transition rather than a silence.
 
+### `backup/freshness`
+
+Opt-in, and declared rather than guessed. This tool cannot see a dump on disk or
+an off-site destination — it speaks read-only SQL to the nodes — so what it
+grades is a query **the operator writes**, against the table their backups
+already record into:
+
+```json
+"backup": {
+  "query": "SELECT MAX(finished_at) FROM ops.backups WHERE status = 'ok' AND offsite = 1",
+  "warn_after": "26h",
+  "bad_after": "50h"
+}
+```
+
+Both halves of the question fit in that `WHERE`: "the last backup that finished"
+and "the last one that reached the other building" are the same `SELECT`.
+Nothing here invents a schema, and nothing needs a second inventory of where the
+backups live.
+
+- older than `warn_after` (default 26h) is `WARN`, older than `bad_after`
+  (default 50h) is `BAD`;
+- **no row** is `BAD`, not silence: either no backup has ever completed, or it
+  is not writing where the query looks;
+- a query that could not run is `ERROR` — the rest of the report still stands;
+- a timestamp in the future is a `WARN` about the clock rather than a fresh
+  backup.
+
+The age is measured against the **answering server's** clock, for the same
+reason [`node/clock`](#nodeclock) compares the nodes with each other: a backup
+should not look late because the machine running the audit has drifted.
+
+The query is checked at load, where the mistake is made: it has to be a single
+`SELECT`, with no `;` in it. A configuration file cannot smuggle a write past a
+tool whose whole promise is that it does not write — and the run-time gate
+refuses it a second time anyway.
+
+Without the block the check is silent, and [`audit/coverage`](#auditcoverage)
+does not count it as a gap: nothing was denied. It runs even when the cluster is
+not a cluster — a broken cluster is when the age of the backup matters most.
+
 ### `audit/coverage`
 
 One line saying what this run could **not** audit: a node that could not be

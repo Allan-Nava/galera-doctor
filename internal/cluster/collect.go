@@ -33,6 +33,11 @@ func (e ErrNotReadOnly) Error() string {
 	return fmt.Sprintf("refused: galera-doctor only issues SHOW and SELECT, got %q", firstWords(e.Query, 6))
 }
 
+// ReadOnly reports whether a statement is one this tool is allowed to send.
+// Exported so a configuration file carrying a query can be checked where the
+// mistake is made, rather than only when it is sent.
+func ReadOnly(q string) bool { return readOnly.MatchString(q) }
+
 // Query is the only way this package talks to a server.
 func Query(ctx context.Context, db *sql.DB, q string, args ...any) (*sql.Rows, error) {
 	if !readOnly.MatchString(q) {
@@ -616,6 +621,124 @@ func membershipView(ctx context.Context, db *sql.DB) ([]Member, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Backup is what a declared backup query returned (GD-14): when the last
+// backup finished, and the answering server's own clock so the age can be
+// measured against it rather than against whatever machine ran the audit.
+type Backup struct {
+	Node string
+	At   *time.Time
+	Now  time.Time
+	Err  string
+}
+
+// AskBackup runs the operator's backup query against the first node that
+// answers.
+//
+// The query goes through the same gate as everything else, so a configuration
+// file cannot make this tool write — and the config refuses a non-SELECT at
+// load, which is where the mistake is made. A timestamp column, a DATE, or a
+// Unix epoch all arrive as text through the driver, so all three are parsed
+// here: what a backup table records in is not this tool's decision.
+func (c Collector) AskBackup(ctx context.Context, nodes []Node, query string) Backup {
+	var last Backup
+	for _, n := range nodes {
+		b := c.askBackup(ctx, n, query)
+		if b.Err == "" {
+			return b
+		}
+		last = b
+	}
+	return last
+}
+
+func (c Collector) askBackup(ctx context.Context, n Node, query string) Backup {
+	out := Backup{Node: n.Name}
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	db, err := sql.Open("mysql", n.DSN)
+	if err != nil {
+		out.Err = redact(err.Error(), n.DSN)
+		return out
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	if now, err := serverClock(ctx, db); err == nil {
+		out.Now = now
+	} else {
+		out.Now = c.now()
+	}
+
+	rows, err := Query(ctx, db, query)
+	if err != nil {
+		out.Err = redact(err.Error(), n.DSN)
+		return out
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		// No row at all: the caller reports that as "nothing recorded", which
+		// is a different statement from an old backup.
+		out.Err = redact(errString(rows.Err()), n.DSN)
+		return out
+	}
+	var v sql.NullString
+	if err := rows.Scan(&v); err != nil {
+		out.Err = redact(err.Error(), n.DSN)
+		return out
+	}
+	if err := rows.Err(); err != nil {
+		out.Err = redact(err.Error(), n.DSN)
+		return out
+	}
+	if !v.Valid || strings.TrimSpace(v.String) == "" {
+		// SELECT MAX(...) over no rows is NULL: the query ran and found
+		// nothing, which is the finding.
+		return out
+	}
+	at, err := parseWhen(strings.TrimSpace(v.String))
+	if err != nil {
+		out.Err = fmt.Sprintf("the backup query returned %q, which is not a time", firstWords(v.String, 4))
+		return out
+	}
+	out.At = &at
+	return out
+}
+
+// parseWhen accepts what a backup table records in: a DATETIME, a DATE, an
+// RFC 3339 timestamp, or a Unix epoch. Guessing between them is safe because
+// they are unambiguous; guessing a *format* would not be, which is why an
+// unparseable value is an error rather than a zero time.
+func parseWhen(v string) (time.Time, error) {
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05",
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02",
+	} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t, nil
+		}
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+		sec, frac := math.Modf(f)
+		return time.Unix(int64(sec), int64(frac*float64(time.Second))).UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("not a time: %q", v)
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // redact keeps a DSN — and therefore a password — out of an error message. A

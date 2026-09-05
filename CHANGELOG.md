@@ -6,6 +6,51 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.2.0] - 2026-09-05
+
+### Added
+
+- **`backup/freshness`** (GD-14) — the item that was parked because a dump on
+  disk and an off-site destination are both outside this tool's channel. The
+  form that fits is the one the parked note described: the operator declares a
+  query, and this grades it.
+
+  ```json
+  "backup": {
+    "query": "SELECT MAX(finished_at) FROM ops.backups WHERE status = 'ok' AND offsite = 1",
+    "warn_after": "26h",
+    "bad_after": "50h"
+  }
+  ```
+
+  Both halves of the original question fit in that `WHERE`: "the last backup
+  that finished" and "the last one that reached the other building" are the same
+  `SELECT`. No schema is invented, and no second inventory of where the backups
+  live is needed.
+
+  Older than `warn_after` is `WARN` and older than `bad_after` is `BAD`; **no
+  row** is `BAD` rather than silence, because either no backup has ever
+  completed or it is not writing where the query looks; a query that could not
+  run is `ERROR` and the rest of the report still stands; and a timestamp in the
+  future is a warning about the clock rather than a fresh backup. The age is
+  measured against the **answering server's** clock, for the same reason
+  `node/clock` compares the nodes with each other.
+
+  The query is validated where the mistake is made — at load: a single `SELECT`,
+  no `;`, refused otherwise. A configuration file cannot smuggle a write past a
+  tool whose whole promise is that it does not write, and the run-time gate
+  refuses it a second time anyway.
+
+  Running it against a real server settled a design question the fixtures could
+  not: the check now runs on **every** path out of the audit, including "no node
+  here is running Galera". A broken cluster is when the age of the backup
+  matters most, and the question was asked explicitly in the configuration.
+
+  Verified end to end against MariaDB with a real `ops.backups` table: fresh,
+  60 hours old, a table that does not exist, a query that matches no row, and a
+  query that writes — which never reaches the server, because the config refuses
+  it first.
+
 ## [1.1.1] - 2026-09-05
 
 ### Added

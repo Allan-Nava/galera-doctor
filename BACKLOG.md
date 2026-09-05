@@ -342,15 +342,14 @@ and to a ProxySQL admin interface — and they are kept here, with the reason,
 because an item that quietly disappears is an item somebody proposes again in
 six months. Each one names the form in which it *would* earn its place.
 
-- [ ] **GD-14 — Backup freshness**: a dump on disk is not a backup that left the
-  building. Check the age of the local dump *and* whether it reached its
-  off-site destination, because the first without the second is the failure
-  everybody discovers at the worst moment. **Parked**: this needs the
-  filesystem and the off-site destination, and this tool only speaks read-only
-  SQL to nodes — as written it is a generic backup check and belongs in
-  [checkfleet](https://github.com/Allan-Nava/checkfleet). It earns its place
-  here only in a form that reads backup metadata out of a table named in the
-  config. <!-- gd: prio=high size=M labels=check -->
+- [x] **GD-14 — Backup freshness, declared not guessed**: the config carries a
+  `backup` block — a `SELECT` the operator writes against the table their
+  backups already record into, plus two thresholds — and `backup/freshness`
+  grades its age against the answering server's clock. Both halves of the
+  original item fit in the `WHERE`: "finished" and "reached the off-site
+  destination" are the same query. The schema stays theirs, and the read-only
+  gate is enforced at load as well as at run time.
+  <!-- gd: prio=high size=M labels=check,cli ver=1.2.0 -->
 - [ ] **GD-15 — SST/IST history**: read the recent state transfers from the
   error log or the status counters, so a cluster that quietly full-syncs a node
   every week is visible. **Parked**: MariaDB exposes no state-transfer

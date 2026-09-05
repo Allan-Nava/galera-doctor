@@ -119,6 +119,7 @@ node/binlog-updates                        a node no downstream replica can be m
 node/restarted                             a node that came back between two runs (needs --state)
 cluster/membership-view                    the group's own member list against the nodes audited
 pxc/strict-mode                            Percona's guard rail: the node that accepts what its peers refuse
+backup/freshness                           the backup query this cluster declared, graded (opt-in)
 audit/changes                              what appeared, cleared or got worse since the last run (needs --state)
 proxysql/*                                 the proxy's view against the cluster's (needs --proxysql)
 proxysql/monitor                           a proxy whose Galera monitor stopped: the hostgroups are a photograph
