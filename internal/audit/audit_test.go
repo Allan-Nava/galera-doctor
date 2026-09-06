@@ -64,9 +64,15 @@ func healthy(name string, at time.Time) cluster.Snapshot {
 			"wsrep_slave_threads":   "4",
 			// Everything that decides what leaves the cluster, or what a
 			// trigger does when a writeset lands.
-			"log_bin":                  "ON",
-			"binlog_format":            "ROW",
-			"log_slave_updates":        "ON",
+			"log_bin":           "ON",
+			"binlog_format":     "ROW",
+			"log_slave_updates": "ON",
+			// What a write *means*, per node.
+			"sql_mode":                 "STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION",
+			"character_set_server":     "utf8mb4",
+			"collation_server":         "utf8mb4_general_ci",
+			"time_zone":                "SYSTEM",
+			"system_time_zone":         "UTC",
 			"gtid_domain_id":           "1",
 			"gtid_strict_mode":         "ON",
 			"wsrep_slave_run_triggers": "OFF",
@@ -2418,5 +2424,249 @@ func TestTheBackupCheckSurvivesAnUnreadableCluster(t *testing.T) {
 	f := one(t, rep, "backup/freshness")
 	if f.Status != finding.ERROR {
 		t.Fatalf("status = %s, want ERROR: %+v", f.Status, f)
+	}
+}
+
+// GD-59 — sql_mode per node.
+//
+// Galera replicates the result, not the interpretation. A DDL run against a
+// node with a laxer sql_mode produces a different table from the same
+// statement run on its peers, and an application talking to the wrong node
+// gets a truncation where it expected an error — with no conflict, no counter
+// and nothing to certify.
+func TestDisagreeingSQLModesAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Vars["sql_mode"] = "NO_ENGINE_SUBSTITUTION"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/sql-mode")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "cl-02") {
+		t.Fatalf("the odd node must be named: %q", f.Message)
+	}
+	// Naming the mode that is missing is the actionable half; a diff of two
+	// long strings is not.
+	if !strings.Contains(f.Message, "STRICT_TRANS_TABLES") {
+		t.Fatalf("the message must say which mode differs: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "interpretation") {
+		t.Fatalf("the hint has to say why replication never notices: %q", f.Hint)
+	}
+}
+
+// The order of the modes is the server's, not a difference.
+func TestSQLModeOrderIsNotADifference(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["sql_mode"] = "NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES"
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "node/sql-mode"); len(fs) != 0 {
+		t.Fatalf("the same modes in another order are the same modes: %+v", fs)
+	}
+}
+
+func TestAUniformSQLModeIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "node/sql-mode"); len(fs) != 0 {
+		t.Fatalf("uniform is the requirement, not a finding: %+v", fs)
+	}
+}
+
+// GD-60 — character set and collation per node.
+//
+// A CREATE TABLE without an explicit charset is a different table depending on
+// where it ran. That is how a schema/drift finding comes to exist, so this is
+// the cause next to the symptom.
+func TestDisagreeingServerCharsetsAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Vars["character_set_server"] = "latin1"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/charset")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "ov-03") {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Hint, "schema/drift") {
+		t.Fatalf("the hint has to point at the check that reports the consequence: %q", f.Hint)
+	}
+}
+
+func TestDisagreeingServerCollationsAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Vars["collation_server"] = "utf8mb4_unicode_ci"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "node/charset")
+	if f.Status != finding.WARN || !strings.Contains(f.Message, "collation_server") {
+		t.Fatalf("got %+v", f)
+	}
+}
+
+func TestAUniformCharsetIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "node/charset"); len(fs) != 0 {
+		t.Fatalf("uniform is the requirement: %+v", fs)
+	}
+}
+
+// GD-64 — the node the group already distrusts.
+//
+// The group communication layer keeps its own opinion about which members are
+// flaky, and with evs.auto_evict set it acts on it — while every membership
+// check still reads Primary and Synced.
+func TestADelayedNodeIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	// The list is uuid:address:count entries, comma-separated.
+	snaps[0].Status["wsrep_evs_delayed"] = "2f0e9a1c-1111:10.21.1.5:4567:3"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "evs/delayed")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "10.21.1.5") {
+		t.Fatalf("the delayed peer must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "auto_evict") {
+		t.Fatalf("the hint has to say what happens next: %q", f.Hint)
+	}
+}
+
+// An eviction list is the same warning after the fact, and worse.
+func TestAnEvictedNodeIsBad(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Status["wsrep_evs_evict_list"] = "2f0e9a1c-1111"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "evs/evicted")
+	if f.Status != finding.BAD {
+		t.Fatalf("status = %s, want BAD: %+v", f.Status, f)
+	}
+}
+
+// An empty list is the normal state and says nothing.
+func TestAnEmptyDelayedListIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Status["wsrep_evs_delayed"] = ""
+		snaps[i].Status["wsrep_evs_evict_list"] = ""
+	}
+	rep := Run(snaps, nil, opts())
+	for _, check := range []string{"evs/delayed", "evs/evicted"} {
+		if fs := byCheck(t, rep, check); len(fs) != 0 {
+			t.Fatalf("%s fired on an empty list: %+v", check, fs)
+		}
+	}
+}
+
+// A provider that does not report the list is not a provider with an empty one.
+func TestAnUnreportedDelayedListIsNotGraded(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "evs/delayed"); len(fs) != 0 {
+		t.Fatalf("nobody reported it: %+v", fs)
+	}
+}
+
+// GD-63 — the transaction that is going to lose.
+//
+// On a standalone server a long transaction is a slow query. In a cluster it is
+// the next brute-force abort, and it is what makes a rolling schema change
+// hang: TOI waits for it on every node. Same row, different diagnosis.
+func TestALongTransactionIsFound(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[1].Transactions = []cluster.Transaction{
+		{ID: "421394", Started: now.Add(-25 * time.Minute), State: "RUNNING", Rows: 3},
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "txn/long-running")
+	if f.Status != finding.WARN || f.Target != "cl-02" {
+		t.Fatalf("got %+v", f)
+	}
+	if !strings.Contains(f.Message, "25m") {
+		t.Fatalf("the age is the measurement: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "TOI") && !strings.Contains(f.Hint, "schema change") {
+		t.Fatalf("the hint has to give the cluster diagnosis, not the standalone one: %q", f.Hint)
+	}
+}
+
+// The statement text is not in the finding, deliberately: a query carries data,
+// and findings end up in tickets.
+func TestALongTransactionDoesNotLeakItsStatement(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Transactions = []cluster.Transaction{
+		{ID: "1", Started: now.Add(-40 * time.Minute), State: "RUNNING",
+			Query: "UPDATE customers SET email = 'someone@example.com' WHERE id = 42"},
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "txn/long-running")
+	if strings.Contains(f.Message+f.Hint, "example.com") || strings.Contains(f.Message+f.Hint, "customers") {
+		t.Fatalf("the statement text reached the finding: %+v", f)
+	}
+	if !strings.Contains(f.Message, "1") {
+		t.Fatalf("the transaction id is what somebody needs to go and look: %q", f.Message)
+	}
+}
+
+func TestAShortTransactionIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[0].Transactions = []cluster.Transaction{
+		{ID: "1", Started: now.Add(-2 * time.Second), State: "RUNNING"},
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "txn/long-running"); len(fs) != 0 {
+		t.Fatalf("two seconds is a transaction doing its job: %+v", fs)
+	}
+}
+
+// GD-62 — cascading foreign keys.
+//
+// Galera certifies the rows a write touches. A cascade turns one certified
+// write into rows nobody certified, which is the documented weak spot — and it
+// is in the schema rather than in any counter.
+func TestCascadingForeignKeysAreFound(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Cascades = []string{"app.orders → app.order_lines (ON DELETE CASCADE)"}
+	}
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "schema/fk-cascade")
+	if f.Status != finding.WARN {
+		t.Fatalf("status = %s, want WARN: %+v", f.Status, f)
+	}
+	if !strings.Contains(f.Message, "order_lines") {
+		t.Fatalf("the constraint must be named: %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "certif") {
+		t.Fatalf("the hint has to say what certification does with them: %q", f.Hint)
+	}
+}
+
+func TestNoCascadesIsQuiet(t *testing.T) {
+	snaps := threeHealthy()
+	for i := range snaps {
+		snaps[i].Cascades = []string{}
+	}
+	rep := Run(snaps, nil, opts())
+	if fs := byCheck(t, rep, "schema/fk-cascade"); len(fs) != 0 {
+		t.Fatalf("a schema without cascades is not a finding: %+v", fs)
+	}
+}
+
+// GD-65 — a state transfer in flight.
+func TestAStateTransferInFlightIsReported(t *testing.T) {
+	snaps := threeHealthy()
+	snaps[2].Status["wsrep_local_state_comment"] = "Joined"
+	snaps[2].Status["wsrep_ist_receive_status"] = "0.4% complete"
+	rep := Run(snaps, nil, opts())
+	f := one(t, rep, "sst/progress")
+	if f.Status != finding.OK || f.Target != "ov-03" {
+		t.Fatalf("a transfer in progress is a fact, not a fault: %+v", f)
+	}
+	if !strings.Contains(f.Message, "0.4%") {
+		t.Fatalf("how far along it is decides whether waiting is right: %q", f.Message)
+	}
+}
+
+func TestNoTransferIsQuiet(t *testing.T) {
+	rep := Run(threeHealthy(), nil, opts())
+	if fs := byCheck(t, rep, "sst/progress"); len(fs) != 0 {
+		t.Fatalf("nothing is transferring: %+v", fs)
 	}
 }

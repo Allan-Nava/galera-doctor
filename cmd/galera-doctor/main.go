@@ -78,6 +78,8 @@ flags:
   --clock-bad D            ... and to call BAD (default 30s)
   --latency-floor D        replication latency below which a difference inside
                            a segment is noise (default 2ms)
+  --txn-warn D             how long a transaction may stay open before it is
+                           reported (default 5m)
   --watch D                re-audit every D and print only the transitions
   --json                   full report
   --findings               flat findings array
@@ -141,6 +143,11 @@ func cmdChecks() int {
 		{"cluster/membership-view", "the group's own member list against the nodes audited"},
 		{"pxc/strict-mode", "Percona's guard rail: the node that accepts what its peers refuse"},
 		{"backup/freshness", "the backup query this cluster declared, graded (needs a config block)"},
+		{"node/sql-mode, node/charset, node/timezone", "settings that decide what a write means"},
+		{"evs/delayed, evs/evicted", "the node the group communication layer already distrusts"},
+		{"txn/long-running", "the transaction that is going to lose, and hold up a DDL"},
+		{"schema/fk-cascade", "cascades: one certified write, rows nobody certified"},
+		{"sst/progress", "a state transfer in flight, and how far along it is"},
 		{"audit/changes", "what appeared, cleared or got worse since the last run (needs --state)"},
 		{"proxysql/*", "the proxy's view against the cluster's (needs --proxysql)"},
 		{"proxysql/monitor", "a proxy whose Galera monitor stopped: the hostgroups are a photograph"},
@@ -187,6 +194,7 @@ func cmdAudit(args []string) int {
 		istWarn     = fs.Duration("ist-warn", 30*time.Minute, "gcache window below which a restart means a full SST")
 		clockWarn   = fs.Duration("clock-warn", 2*time.Second, "spread between node clocks to WARN at")
 		latFloor    = fs.Duration("latency-floor", 2*time.Millisecond, "replication latency below which a difference inside a segment is noise")
+		txnWarn     = fs.Duration("txn-warn", 5*time.Minute, "how long a transaction may stay open before it is reported")
 		clockBad    = fs.Duration("clock-bad", 30*time.Second, "spread between node clocks to call BAD")
 		watchEvery  = fs.Duration("watch", 0, "re-audit on this interval and print only the transitions")
 		asJSON      = fs.Bool("json", false, "full JSON report")
@@ -263,6 +271,7 @@ func cmdAudit(args []string) int {
 	opt.FlowWarn, opt.FlowBad, opt.ISTWarn = *flowWarn, *flowBad, *istWarn
 	opt.ClockWarn, opt.ClockBad = *clockWarn, *clockBad
 	opt.LatencyFloor = *latFloor
+	opt.TransactionWarn = *txnWarn
 	opt.Now = time.Now()
 
 	// One pass over every target: collect, audit, persist. Extracted so watch

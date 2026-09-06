@@ -6,6 +6,63 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.3.0] - 2026-09-06
+
+M10, finished: the divergences that have not happened yet. Everything before
+this reports a state the cluster is already in; these are settings that will
+produce different rows the next time a DDL runs, a transaction the certifier is
+going to abort, and a node the group is already suspicious of.
+
+### Added
+
+- **`node/sql-mode`, `node/charset`, `node/timezone`** (GD-59, GD-60, GD-61) —
+  the settings that decide what a write *means*. Galera replicates the result
+  of a statement and not its interpretation, so none of this ever becomes a
+  conflict: the same DDL run against a laxer node builds a different table, the
+  same `INSERT` is refused on one node and truncated on another, and a `NOW()`
+  in a default stores a different instant.
+
+  `node/sql-mode` names the flags that are missing where rather than printing
+  two long strings to diff, and the server's own ordering of the set is not a
+  difference. `node/charset` is the cause standing next to `schema/drift`: a
+  `CREATE TABLE` without an explicit charset is a different table depending on
+  where it ran. `node/timezone` also catches the nodes that all agree on
+  `SYSTEM` while their systems do not — the same divergence wearing a uniform.
+
+- **`evs/delayed`, `evs/evicted`** (GD-64) — the group communication layer's own
+  opinion of its members, underneath everything `cluster/*` reads. A node in the
+  delayed list is one the cluster considers flaky and, with `evs.auto_evict`,
+  is going to remove — while every membership check still reads Primary and
+  Synced. An eviction list is `BAD`: an evicted member cannot rejoin until the
+  list is cleared everywhere, so the cluster is permanently smaller than its
+  configuration says.
+
+- **`txn/long-running`** (GD-63) — open transactions from
+  `information_schema.INNODB_TRX`, older than `--txn-warn` (5m). On a standalone
+  server that is a slow query; in a cluster it is the likeliest brute-force
+  abort and the reason a rolling schema change hangs, because a TOI DDL waits
+  for it on every node. Same row, different diagnosis, which is the only reason
+  it belongs here rather than in a generic health check.
+
+  The statement text is deliberately never rendered — it is kept out of the
+  JSON by the type itself and out of every finding — because a query carries
+  data and findings end up in tickets. Verified against a real server: an open
+  transaction comes back with its id, its start time and its row count, and the
+  query text does not appear in the marshalled snapshot.
+
+- **`schema/fk-cascade`** (GD-62) — cascading foreign keys in the application
+  schemas. Certification covers the rows the statement touched, not the rows a
+  cascade goes on to change: two writes to different parents can both certify
+  and still collide in the child, which arrives as an inconsistency rather than
+  as a conflict.
+
+- **`sst/progress`** (GD-65) — `wsrep_ist_receive_status` while a transfer is
+  running. `node/state` says Donor/Desynced or Joined; this says how far along
+  it is, which is what decides whether waiting is the right thing to do.
+
+- **`--txn-warn D`** — the threshold for the above, because the right number is
+  a property of the workload rather than of this tool.
+
 ## [1.2.0] - 2026-09-05
 
 ### Added

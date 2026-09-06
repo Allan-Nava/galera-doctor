@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**65 items · 55 shipped · 10 open · 10 milestones.**
+**65 items · 62 shipped · 3 open · 10 milestones.**
 
 ## At a glance
 
@@ -21,19 +21,13 @@
 | **M7** — Every write path, drawn or not | `v1.0.0` | shipped | `##########` 100% | 0 | 7 |
 | **M8** — Parked, and why | `v2.0.0` | later | `#####.....` 50% | 2 | 2 |
 | **M9** — Beyond Galera | `v2.0.0` | later | `#####.....` 50% | 1 | 1 |
-| **M10** — Divergence that has not happened yet | `v1.3.0` | next | `..........` 0% | 7 | 0 |
+| **M10** — Divergence that has not happened yet | `v1.3.0` | shipped | `##########` 100% | 0 | 7 |
 
 ## Next up
 
 The open items with the highest priority in the milestones that are in flight.
 
-- **GD-59** — `sql_mode` per node · `high` · size `S` · check (M10, target `v1.3.0`)
-- **GD-60** — Character set and collation per node · `high` · size `S` · check (M10, target `v1.3.0`)
-- **GD-63** — The transaction that is going to lose · `high` · size `M` · check,collect (M10, target `v1.3.0`)
-- **GD-64** — The node the group already distrusts · `high` · size `S` · check (M10, target `v1.3.0`)
-- **GD-61** — Time zone, per node · `med` · size `S` · check (M10, target `v1.3.0`)
-- **GD-62** — Cascading foreign keys · `med` · size `M` · check,collect (M10, target `v1.3.0`)
-- **GD-65** — A state transfer in flight · `low` · size `S` · check (M10, target `v1.3.0`)
+_Nothing in flight._
 
 ## Milestones
 
@@ -160,26 +154,26 @@ Target `v2.0.0` · later · 1 open · 1 shipped · `#####.....` 50%
 
 ### M10 — Divergence that has not happened yet
 
-Target `v1.3.0` · next · 7 open · 0 shipped · `..........` 0%
+Target `v1.3.0` · shipped · 0 open · 7 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-59** — `sql_mode` per node | high | S | check | open |
-| **GD-60** — Character set and collation per node | high | S | check | open |
-| **GD-63** — The transaction that is going to lose | high | M | check,collect | open |
-| **GD-64** — The node the group already distrusts | high | S | check | open |
-| **GD-61** — Time zone, per node | med | S | check | open |
-| **GD-62** — Cascading foreign keys | med | M | check,collect | open |
-| **GD-65** — A state transfer in flight | low | S | check | open |
+| **GD-59** — `sql_mode` per node | high | S | check | shipped `1.3.0` |
+| **GD-60** — Character set and collation per node | high | S | check | shipped `1.3.0` |
+| **GD-63** — The transaction that is going to lose | high | M | check,collect | shipped `1.3.0` |
+| **GD-64** — The node the group already distrusts | high | S | check | shipped `1.3.0` |
+| **GD-61** — Time zone, per node | med | S | check | shipped `1.3.0` |
+| **GD-62** — Cascading foreign keys | med | M | check,collect | shipped `1.3.0` |
+| **GD-65** — A state transfer in flight | low | S | check | shipped `1.3.0` |
 
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 42 | 9 |
-| `collect` | 6 | 2 |
+| `check` | 42 | 2 |
 | `integration` | 1 | 1 |
 | `cli` | 3 | 0 |
+| `collect` | 6 | 0 |
 | `delivery` | 2 | 0 |
 | `docs` | 5 | 0 |
 | `output` | 4 | 0 |

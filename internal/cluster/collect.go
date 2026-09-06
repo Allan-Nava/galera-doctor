@@ -155,6 +155,19 @@ func (c Collector) Collect(ctx context.Context, n Node) Snapshot {
 		_ = err
 	}
 
+	// The transactions open right now, and the cascading constraints in the
+	// application schemas (GD-63, GD-62).
+	if snap.Transactions, err = openTransactions(ctx, db); err != nil {
+		snap.Transactions = nil
+		_ = err
+	}
+	if !c.SkipSchema {
+		if snap.Cascades, err = cascadingKeys(ctx, db); err != nil {
+			snap.Cascades = nil
+			_ = err
+		}
+	}
+
 	// The group's own membership view, where the wsrep_info plugin is
 	// installed (GD-53). Optional: nil is "there is no such view", which is
 	// not a gap in the audit and is not reported as one.
@@ -739,6 +752,74 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// openTransactions reads information_schema.INNODB_TRX (GD-63).
+//
+// The statement text is read and then never rendered: cluster.Transaction keeps
+// it out of JSON, and the audit never puts it in a finding. A query carries
+// data, and findings end up in tickets.
+func openTransactions(ctx context.Context, db *sql.DB) ([]Transaction, error) {
+	rows, err := Query(ctx, db, `
+		SELECT trx_id, trx_started, trx_state, trx_rows_modified, IFNULL(trx_query, '')
+		  FROM information_schema.INNODB_TRX
+		 ORDER BY trx_started`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Transaction{}
+	for rows.Next() {
+		var t Transaction
+		var started sql.NullString
+		if err := rows.Scan(&t.ID, &started, &t.State, &t.Rows, &t.Query); err != nil {
+			return nil, err
+		}
+		if started.Valid {
+			if at, err := parseWhen(strings.TrimSpace(started.String)); err == nil {
+				t.Started = at
+			}
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// cascadingKeys lists the cascading foreign keys in the application schemas
+// (GD-62), rendered the way the finding prints them.
+func cascadingKeys(ctx context.Context, db *sql.DB) ([]string, error) {
+	args := make([]any, 0, len(SystemSchemas))
+	for _, s := range SystemSchemas {
+		args = append(args, s)
+	}
+	rows, err := Query(ctx, db, `
+		SELECT CONSTRAINT_SCHEMA, TABLE_NAME, REFERENCED_TABLE_NAME, UPDATE_RULE, DELETE_RULE
+		  FROM information_schema.REFERENTIAL_CONSTRAINTS
+		 WHERE CONSTRAINT_SCHEMA NOT IN (`+placeholders(len(SystemSchemas))+`)
+		   AND (UPDATE_RULE = 'CASCADE' OR DELETE_RULE = 'CASCADE'
+		        OR UPDATE_RULE = 'SET NULL' OR DELETE_RULE = 'SET NULL')
+		 ORDER BY CONSTRAINT_SCHEMA, TABLE_NAME`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var schema, table, parent, onUpdate, onDelete string
+		if err := rows.Scan(&schema, &table, &parent, &onUpdate, &onDelete); err != nil {
+			return nil, err
+		}
+		var actions []string
+		if onDelete == "CASCADE" || onDelete == "SET NULL" {
+			actions = append(actions, "ON DELETE "+onDelete)
+		}
+		if onUpdate == "CASCADE" || onUpdate == "SET NULL" {
+			actions = append(actions, "ON UPDATE "+onUpdate)
+		}
+		out = append(out, fmt.Sprintf("%s.%s → %s.%s (%s)",
+			schema, parent, schema, table, strings.Join(actions, ", ")))
+	}
+	return out, rows.Err()
 }
 
 // redact keeps a DSN — and therefore a password — out of an error message. A

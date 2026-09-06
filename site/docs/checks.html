@@ -149,6 +149,50 @@ It is per node like everything else here, so the nodes <strong>disagreeing</stro
 <p>
 MariaDB has no such variable, and a verdict about a setting that does not exist is not a verdict.
 </p>
+<h2 id="divergence-that-has-not-happened-yet">Divergence that has not happened yet</h2>
+<p>
+Everything above reports a state the cluster is already in. These are the ones where it is not yet: a setting that will produce different rows the next time somebody runs a DDL, a transaction the certifier is going to abort, a node the group is already suspicious of. From replication's point of view nothing has gone wrong at all, which is why none of it is in a counter.
+</p>
+<h3 id="node-sql-mode-node-charset-node-timezone"><code>node/sql-mode</code>, <code>node/charset</code>, <code>node/timezone</code></h3>
+<p>
+The settings that decide what a write <strong>means</strong>, compared across nodes.
+</p>
+<p>
+Galera replicates the <em>result</em> of a statement, not its interpretation, so none of this ever becomes a conflict:
+</p>
+<ul>
+<li><strong><code>node/sql-mode</code></strong> — the same DDL run against a laxer node builds a different table, and the same <code>INSERT</code> is refused on one node and truncated on another. The finding names the flags that are missing where, not two long strings to diff, and the server's own ordering of the set is not a difference.</li>
+<li><strong><code>node/charset</code></strong> — <code>character_set_server</code> and <code>collation_server</code>. A <code>CREATE TABLE</code> without an explicit charset is a different table depending on where it ran, which is where a <a href="#schemadrift"><code>schema/drift</code></a> finding comes from: the cause standing next to the symptom, the way <a href="#replosu-method"><code>repl/osu-method</code></a> is for the other kind.</li>
+<li><strong><code>node/timezone</code></strong> — <code>time_zone</code>, and <code>system_time_zone</code> when the nodes all say <code>SYSTEM</code>: agreeing on <code>SYSTEM</code> is not agreeing on a time zone, and a <code>NOW()</code> in a default or a trigger stores a different instant per node.</li>
+</ul>
+<h3 id="evs-delayed-evs-evicted"><code>evs/delayed</code>, <code>evs/evicted</code></h3>
+<p>
+<code>wsrep_evs_delayed</code> and the eviction list — the group communication layer's own opinion of its members, underneath everything <code>cluster/*</code> reads.
+</p>
+<p>
+A node named in the delayed list is one the cluster considers flaky and, with <code>evs.auto_evict</code> set, is going to remove — while every membership check still reads Primary and Synced. An eviction list is the same warning after the fact and worse: an evicted member cannot rejoin until the list is cleared on every node, so the cluster is permanently smaller than its configuration says.
+</p>
+<h3 id="txn-long-running"><code>txn/long-running</code></h3>
+<p>
+Open transactions from <code>information_schema.INNODB_TRX</code>, older than <code>--txn-warn</code> (5m).
+</p>
+<p>
+On a standalone server that is a slow query. In a cluster it is two other things: the likeliest <strong>brute-force abort</strong> when a conflicting writeset arrives, and the reason a rolling schema change hangs, because a TOI DDL waits for it on every node. Same row, different diagnosis — which is the only reason it is in this tool and not in a generic health check.
+</p>
+<p>
+The statement text is deliberately <strong>not</strong> in the finding: a query carries data, and findings end up in tickets. The id and the age are what somebody needs in order to go and look.
+</p>
+<h3 id="schema-fk-cascade"><code>schema/fk-cascade</code></h3>
+<p>
+Cascading foreign keys in the application schemas.
+</p>
+<p>
+Certification covers the rows the statement touched, not the rows a cascade goes on to change. Two writes to different parents can both certify and still collide in the child, which arrives as an inconsistency rather than as a conflict — the documented weak spot of certification-based replication, living in the schema where no counter looks.
+</p>
+<h3 id="sst-progress"><code>sst/progress</code></h3>
+<p>
+<code>wsrep_ist_receive_status</code> while a transfer is running. <a href="#nodestate"><code>node/state</code></a> already says Donor/Desynced or Joined; this says how far along it is, which is what decides whether waiting is the right thing to do.
+</p>
 <h2 id="the-write-paths-nobody-drew">The write paths nobody drew</h2>
 <p>
 A cluster is drawn as three nodes replicating to each other. Real deployments are rarely that tidy, and <strong>the cluster cannot see a write path it is not part of</strong> — so none of this appears in any <code>wsrep_*</code> counter.

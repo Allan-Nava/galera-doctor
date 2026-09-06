@@ -111,6 +111,16 @@ func TestCollectAgainstARealServer(t *testing.T) {
 		t.Fatalf("a throwaway server should have no sources: %+v", snap.Replicas)
 	}
 
+	// GD-63/GD-62: both reads answer on a server with nothing to report, and
+	// an empty slice is not nil — the difference is what audit/coverage would
+	// have to say.
+	if snap.Transactions == nil {
+		t.Fatal("the open-transaction read failed: nil means \"not audited\"")
+	}
+	if snap.Cascades == nil {
+		t.Fatal("the cascading-key read failed: nil means \"not audited\"")
+	}
+
 	// The primary key query must not report the server's own tables.
 	for _, table := range snap.TablesNoPK {
 		for _, schema := range SystemSchemas {
@@ -121,6 +131,6 @@ func TestCollectAgainstARealServer(t *testing.T) {
 	}
 	t.Logf("read %d status, %d variables, %d system tables, %d application tables, %d without a primary key, %d not on a replicated engine",
 		len(snap.Status), len(snap.Vars), len(snap.SysTables), len(snap.AppTables), len(snap.TablesNoPK), len(snap.TablesNonInnoDB))
-	t.Logf("clock skew against this host: %s, dataset %d bytes, %d source(s), %d downstream replica(s)",
-		snap.Clock.Sub(snap.At), *snap.DataBytes, len(snap.Replicas), len(snap.ReplicaHosts))
+	t.Logf("clock skew against this host: %s, dataset %d bytes, %d source(s), %d downstream replica(s), %d open transaction(s), %d cascade(s)",
+		snap.Clock.Sub(snap.At), *snap.DataBytes, len(snap.Replicas), len(snap.ReplicaHosts), len(snap.Transactions), len(snap.Cascades))
 }

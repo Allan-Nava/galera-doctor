@@ -115,6 +115,76 @@ possibility.
 MariaDB has no such variable, and a verdict about a setting that does not exist
 is not a verdict.
 
+## Divergence that has not happened yet
+
+Everything above reports a state the cluster is already in. These are the ones
+where it is not yet: a setting that will produce different rows the next time
+somebody runs a DDL, a transaction the certifier is going to abort, a node the
+group is already suspicious of. From replication's point of view nothing has
+gone wrong at all, which is why none of it is in a counter.
+
+### `node/sql-mode`, `node/charset`, `node/timezone`
+
+The settings that decide what a write **means**, compared across nodes.
+
+Galera replicates the *result* of a statement, not its interpretation, so none
+of this ever becomes a conflict:
+
+- **`node/sql-mode`** — the same DDL run against a laxer node builds a different
+  table, and the same `INSERT` is refused on one node and truncated on another.
+  The finding names the flags that are missing where, not two long strings to
+  diff, and the server's own ordering of the set is not a difference.
+- **`node/charset`** — `character_set_server` and `collation_server`. A
+  `CREATE TABLE` without an explicit charset is a different table depending on
+  where it ran, which is where a [`schema/drift`](#schemadrift) finding comes
+  from: the cause standing next to the symptom, the way
+  [`repl/osu-method`](#replosu-method) is for the other kind.
+- **`node/timezone`** — `time_zone`, and `system_time_zone` when the nodes all
+  say `SYSTEM`: agreeing on `SYSTEM` is not agreeing on a time zone, and a
+  `NOW()` in a default or a trigger stores a different instant per node.
+
+### `evs/delayed`, `evs/evicted`
+
+`wsrep_evs_delayed` and the eviction list — the group communication layer's own
+opinion of its members, underneath everything `cluster/*` reads.
+
+A node named in the delayed list is one the cluster considers flaky and, with
+`evs.auto_evict` set, is going to remove — while every membership check still
+reads Primary and Synced. An eviction list is the same warning after the fact
+and worse: an evicted member cannot rejoin until the list is cleared on every
+node, so the cluster is permanently smaller than its configuration says.
+
+### `txn/long-running`
+
+Open transactions from `information_schema.INNODB_TRX`, older than
+`--txn-warn` (5m).
+
+On a standalone server that is a slow query. In a cluster it is two other
+things: the likeliest **brute-force abort** when a conflicting writeset arrives,
+and the reason a rolling schema change hangs, because a TOI DDL waits for it on
+every node. Same row, different diagnosis — which is the only reason it is in
+this tool and not in a generic health check.
+
+The statement text is deliberately **not** in the finding: a query carries data,
+and findings end up in tickets. The id and the age are what somebody needs in
+order to go and look.
+
+### `schema/fk-cascade`
+
+Cascading foreign keys in the application schemas.
+
+Certification covers the rows the statement touched, not the rows a cascade goes
+on to change. Two writes to different parents can both certify and still collide
+in the child, which arrives as an inconsistency rather than as a conflict — the
+documented weak spot of certification-based replication, living in the schema
+where no counter looks.
+
+### `sst/progress`
+
+`wsrep_ist_receive_status` while a transfer is running. [`node/state`](#nodestate)
+already says Donor/Desynced or Joined; this says how far along it is, which is
+what decides whether waiting is the right thing to do.
+
 ## The write paths nobody drew
 
 A cluster is drawn as three nodes replicating to each other. Real deployments

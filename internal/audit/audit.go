@@ -41,6 +41,11 @@ type Options struct {
 	// ISTWarn is the shortest gcache window worth having: below it, a node that
 	// restarts is likely to need a full SST instead of an incremental transfer.
 	ISTWarn time.Duration
+	// TransactionWarn is how long a transaction may stay open before it is
+	// worth a line. In a cluster the number is not about slowness: it is about
+	// being the likeliest brute-force abort and about holding up a TOI schema
+	// change.
+	TransactionWarn time.Duration
 	// LatencyFloor is the replication latency below which a difference between
 	// nodes in one segment is noise: a 4x ratio between 90µs and 350µs is not
 	// a finding, and grading it is how a check gets switched off.
@@ -79,14 +84,15 @@ type BackupResult struct {
 // DefaultOptions are the thresholds used when a caller passes none.
 func DefaultOptions() Options {
 	return Options{
-		FlowWarn:      0.01,
-		FlowBad:       0.10,
-		RecvQueueWarn: 10,
-		ISTWarn:       30 * time.Minute,
-		LatencyFloor:  2 * time.Millisecond,
-		ClockWarn:     2 * time.Second,
-		ClockBad:      30 * time.Second,
-		Now:           time.Now(),
+		FlowWarn:        0.01,
+		FlowBad:         0.10,
+		RecvQueueWarn:   10,
+		ISTWarn:         30 * time.Minute,
+		LatencyFloor:    2 * time.Millisecond,
+		TransactionWarn: 5 * time.Minute,
+		ClockWarn:       2 * time.Second,
+		ClockBad:        30 * time.Second,
+		Now:             time.Now(),
 	}
 }
 
@@ -197,6 +203,11 @@ func Run(snaps []cluster.Snapshot, prev *state.State, opt Options) Report {
 	add(restarted(live, prev, rep.State)...)
 	add(membershipView(rep.Cluster, live)...)
 	add(strictMode(rep.Cluster, live)...)
+	add(interpretation(rep.Cluster, live)...)
+	add(evs(live)...)
+	add(longTransactions(live, opt)...)
+	add(cascades(live)...)
+	add(transferProgress(live)...)
 	add(coverage(rep.Cluster, snaps, live, prev)...)
 	add(storageEngines(live)...)
 	add(primaryKeys(live)...)
@@ -2579,6 +2590,281 @@ func backupFreshness(name string, opt Options) []finding.Finding {
 		f.Hint = "the recorded time is ahead of the server's own clock: check node/clock in this report, and what writes that column"
 	}
 	return []finding.Finding{f}
+}
+
+// interpretation reports the settings that decide what a write *means*
+// (GD-59, GD-60, GD-61).
+//
+// Galera replicates the result, not the interpretation. A DDL run against a
+// node with a laxer sql_mode produces a different table from the same statement
+// run on its peers; a CREATE TABLE without an explicit charset is a different
+// table depending on where it ran; a NOW() in a default is a different instant.
+// None of it is ever a conflict, because by the time replication sees anything
+// the interpreting is done — which is why this is the cause standing next to
+// schema/drift rather than another symptom of it.
+func interpretation(name string, live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+
+	// sql_mode is a set, and the server prints it in its own order.
+	var modes []cluster.Snapshot
+	for _, s := range live {
+		if _, ok := s.Var("sql_mode"); ok {
+			modes = append(modes, s)
+		}
+	}
+	if len(modes) > 1 {
+		groups := groupBy(modes, func(s cluster.Snapshot) string {
+			v, _ := s.Var("sql_mode")
+			return canonicalSet(v)
+		})
+		if len(groups) > 1 {
+			out = append(out, finding.Finding{
+				Check: "node/sql-mode", Target: name, Status: finding.WARN,
+				Message: "nodes disagree about sql_mode: " + describeSetDifference(modes, "sql_mode"),
+				Hint:    "Galera replicates the result of a statement, not its interpretation, so this never becomes a conflict: the same DDL run on the wrong node builds a different table, and the same INSERT is refused on one node and truncated on another",
+			})
+		}
+	}
+
+	for _, v := range []struct{ key, hint string }{
+		{"character_set_server",
+			"a CREATE TABLE without an explicit charset is a different table depending on which node ran it — which is where a schema/drift finding comes from, and why this is the cause rather than another symptom"},
+		{"collation_server",
+			"the same comparison sorts and matches differently depending on which node built the table — and schema/drift reports the definitions that result, one release later than this would have"},
+		{"time_zone",
+			"a NOW() in a default, a trigger or a view stores a different instant depending on the node that evaluated it: same statement, different row, no conflict"},
+	} {
+		var reporting []cluster.Snapshot
+		for _, s := range live {
+			if val, ok := s.Var(v.key); ok && strings.TrimSpace(val) != "" {
+				reporting = append(reporting, s)
+			}
+		}
+		if len(reporting) < 2 {
+			continue
+		}
+		groups := groupBy(reporting, func(s cluster.Snapshot) string {
+			val, _ := s.Var(v.key)
+			return strings.TrimSpace(val)
+		})
+		if len(groups) == 1 {
+			continue
+		}
+		check := "node/charset"
+		if v.key == "time_zone" {
+			check = "node/timezone"
+		}
+		out = append(out, finding.Finding{
+			Check: check, Target: name, Status: finding.WARN,
+			Message: fmt.Sprintf("nodes disagree about %s: %s", v.key, describeGroups(groups)),
+			Hint:    v.hint,
+		})
+	}
+
+	// SYSTEM means "whatever the machine says", so two nodes agreeing on
+	// SYSTEM and disagreeing underneath is the same divergence wearing a
+	// uniform.
+	var systems []cluster.Snapshot
+	for _, s := range live {
+		if tz, ok := s.Var("time_zone"); ok && strings.EqualFold(strings.TrimSpace(tz), "SYSTEM") {
+			if _, ok := s.Var("system_time_zone"); ok {
+				systems = append(systems, s)
+			}
+		}
+	}
+	if len(systems) > 1 {
+		groups := groupBy(systems, func(s cluster.Snapshot) string {
+			v, _ := s.Var("system_time_zone")
+			return strings.TrimSpace(v)
+		})
+		if len(groups) > 1 {
+			out = append(out, finding.Finding{
+				Check: "node/timezone", Target: name, Status: finding.WARN,
+				Message: "nodes all use time_zone=SYSTEM and their systems disagree: " + describeGroups(groups),
+				Hint:    "agreeing on SYSTEM is not agreeing on a time zone — the setting is uniform and the value it resolves to is not, which is the same divergence wearing a uniform",
+			})
+		}
+	}
+	return out
+}
+
+// canonicalSet sorts a comma-separated set so the server's own ordering is not
+// read as a difference.
+func canonicalSet(v string) string {
+	parts := strings.Split(strings.ToUpper(strings.TrimSpace(v)), ",")
+	out := parts[:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+// describeSetDifference names the flags that are not everywhere, rather than
+// printing two long strings and leaving the reader to diff them.
+func describeSetDifference(snaps []cluster.Snapshot, key string) string {
+	present := map[string]map[string]bool{} // flag -> nodes
+	all := map[string]bool{}
+	for _, s := range snaps {
+		v, _ := s.Var(key)
+		for _, flag := range strings.Split(canonicalSet(v), ",") {
+			if flag == "" {
+				continue
+			}
+			all[flag] = true
+			if present[flag] == nil {
+				present[flag] = map[string]bool{}
+			}
+			present[flag][s.Node] = true
+		}
+	}
+	flags := make([]string, 0, len(all))
+	for f := range all {
+		flags = append(flags, f)
+	}
+	sort.Strings(flags)
+
+	var parts []string
+	for _, f := range flags {
+		if len(present[f]) == len(snaps) {
+			continue
+		}
+		var missing []string
+		for _, s := range snaps {
+			if !present[f][s.Node] {
+				missing = append(missing, s.Node)
+			}
+		}
+		sort.Strings(missing)
+		parts = append(parts, fmt.Sprintf("%s is not set on %s", f, strings.Join(missing, ", ")))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// evs reports what the group communication layer thinks of its own members
+// (GD-64).
+//
+// Every membership check in this report reads what the *cluster* says: Primary,
+// Synced, a size. Underneath that, gcomm keeps a list of members it considers
+// delayed — and with evs.auto_evict set it eventually removes them. A node on
+// that list is one the cluster is about to act against while every other check
+// still reads healthy.
+func evs(live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, s := range live {
+		if v, ok := s.Get("wsrep_evs_delayed"); ok && strings.TrimSpace(v) != "" {
+			out = append(out, finding.Finding{
+				Check: "evs/delayed", Target: s.Node, Status: finding.WARN,
+				Message: "this node reports delayed peers: " + strings.TrimSpace(v),
+				Hint:    "the group communication layer keeps its own opinion about which members are flaky, and with evs.auto_evict set it removes them — this is the cluster warning about a node while every membership check still reads Primary and Synced",
+			})
+		}
+		if v, ok := s.Get("wsrep_evs_evict_list"); ok && strings.TrimSpace(v) != "" {
+			out = append(out, finding.Finding{
+				Check: "evs/evicted", Target: s.Node, Status: finding.BAD,
+				Message: "this node holds an eviction list: " + strings.TrimSpace(v),
+				Hint:    "an evicted member cannot rejoin until the list is cleared on every node — the cluster is smaller than its configuration says, permanently, and nothing else in this report will say so",
+			})
+		}
+	}
+	return out
+}
+
+// longTransactions reports the transaction that is going to lose (GD-63).
+//
+// On a standalone server an old transaction is a slow query. In a cluster it is
+// two other things: the next brute-force abort — Galera kills the local
+// transaction that conflicts with a certified writeset, and the oldest one is
+// the likeliest — and the reason a rolling schema change hangs, because a TOI
+// DDL waits for it on every node.
+//
+// The statement text is deliberately not in the finding. A query carries data,
+// and findings end up in tickets; the id and the age are what somebody needs in
+// order to go and look.
+func longTransactions(live []cluster.Snapshot, opt Options) []finding.Finding {
+	var out []finding.Finding
+	for _, s := range live {
+		for _, t := range s.Transactions {
+			if t.Started.IsZero() {
+				continue
+			}
+			age := opt.Now.Sub(t.Started)
+			if age < opt.TransactionWarn {
+				continue
+			}
+			msg := fmt.Sprintf("transaction %s has been open for %s", t.ID, age.Round(time.Second))
+			if t.State != "" {
+				msg += " (" + strings.ToLower(t.State) + ")"
+			}
+			if t.Rows > 0 {
+				msg += fmt.Sprintf(", %d row(s) modified", t.Rows)
+			}
+			out = append(out, finding.Finding{
+				Check: "txn/long-running", Target: s.Node, Status: finding.WARN,
+				Message: msg,
+				Value:   finding.Num(age.Seconds()), Unit: "seconds",
+				Hint: "in a cluster this is not only a slow query: it is the likeliest brute-force abort when a conflicting writeset arrives, and a TOI schema change waits for it on every node — which is what a rolling DDL that never finishes looks like from here",
+			})
+		}
+	}
+	return out
+}
+
+// cascades reports foreign keys that certify less than they appear to (GD-62).
+//
+// Galera certifies the rows a write touches. A cascading constraint turns one
+// certified write into rows nobody certified — the documented weak spot of
+// certification-based replication — and it lives in the schema, where no
+// counter looks.
+func cascades(live []cluster.Snapshot) []finding.Finding {
+	seen := map[string]bool{}
+	for _, s := range live {
+		for _, c := range s.Cascades {
+			seen[c] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	list := make([]string, 0, len(seen))
+	for c := range seen {
+		list = append(list, c)
+	}
+	sort.Strings(list)
+	shown := list
+	suffix := ""
+	if len(shown) > 5 {
+		shown, suffix = shown[:5], fmt.Sprintf(" (+%d more)", len(list)-5)
+	}
+	return []finding.Finding{{
+		Check: "schema/fk-cascade", Target: "schema", Status: finding.WARN,
+		Message: fmt.Sprintf("%d cascading foreign key(s): %s%s", len(list), strings.Join(shown, ", "), suffix),
+		Value:   finding.Num(float64(len(list))), Unit: "constraints",
+		Hint: "certification covers the rows the statement touched, not the rows a cascade goes on to change: two writes to different parents can both certify and still collide in the child, which arrives as an inconsistency rather than as a conflict",
+	}}
+}
+
+// transferProgress reports a state transfer in flight (GD-65).
+//
+// node/state already says Donor/Desynced or Joined. What it cannot say is
+// whether waiting is the right thing to do, and that is the whole question
+// while somebody watches a node rejoin.
+func transferProgress(live []cluster.Snapshot) []finding.Finding {
+	var out []finding.Finding
+	for _, s := range live {
+		v, ok := s.Get("wsrep_ist_receive_status")
+		if !ok || strings.TrimSpace(v) == "" {
+			continue
+		}
+		out = append(out, finding.Finding{
+			Check: "sst/progress", Target: s.Node, Status: finding.OK,
+			Message: "state transfer in progress: " + strings.TrimSpace(v),
+			Hint:    "this is why the node is not Synced — the useful question is whether it is moving, and this is the number that answers it",
+		})
+	}
+	return out
 }
 
 // primaryKeys reports application tables Galera cannot certify reliably.

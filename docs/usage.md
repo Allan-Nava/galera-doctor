@@ -86,6 +86,7 @@ config is read, not when it is sent.
 | `--json` / `--findings` | — | full report / flat findings array ([the contract](findings.md)) |
 | `--min-severity S` | — | hide findings below `S` |
 | `--exit-on S` | never | exit 1 when a finding reaches `S` |
+| `--txn-warn D` | 5m | how long a transaction may stay open before it is reported |
 | `--watch D` | off | re-audit every `D` and print only the transitions |
 
 ## Exit status

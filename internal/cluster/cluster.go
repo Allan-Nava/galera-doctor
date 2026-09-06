@@ -59,6 +59,17 @@ type Snapshot struct {
 	// TablesNoPK lists application tables without a primary key. Galera's
 	// row-based certification needs one.
 	TablesNoPK []string `json:"tables_no_pk,omitempty"`
+	// Transactions are the transactions open on this node right now, from
+	// information_schema.INNODB_TRX. In a cluster a long one is the next
+	// brute-force abort and the reason a rolling schema change hangs, which is
+	// a different diagnosis from the slow query it would be on a standalone
+	// server (GD-63).
+	Transactions []Transaction `json:"transactions,omitempty"`
+	// Cascades are the cascading foreign keys in the application schemas,
+	// rendered "parent → child (ON DELETE CASCADE)". Galera certifies the rows
+	// a write touches; a cascade turns one certified write into rows nobody
+	// certified (GD-62). nil means not read.
+	Cascades []string `json:"cascades,omitempty"`
 	// Membership is the group's own view of who is in it, from
 	// information_schema.WSREP_MEMBERSHIP where the wsrep_info plugin is
 	// installed. nil means there is no such view — the plugin is optional, so
@@ -90,6 +101,19 @@ type Snapshot struct {
 	// then rests on fewer nodes than it claims, so the audit reports it as an
 	// ERROR rather than skipping the node quietly.
 	Err string `json:"error,omitempty"`
+}
+
+// Transaction is one open transaction.
+//
+// Query is carried for completeness and deliberately never reaches a finding:
+// a statement contains data, and findings end up in tickets. The id is what
+// somebody needs in order to go and look.
+type Transaction struct {
+	ID      string    `json:"id"`
+	Started time.Time `json:"started"`
+	State   string    `json:"state,omitempty"`
+	Rows    int64     `json:"rows_modified,omitempty"`
+	Query   string    `json:"-"`
 }
 
 // Member is one row of the group's own membership view. Name is whatever the
