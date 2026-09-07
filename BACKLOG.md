@@ -440,3 +440,81 @@ replication's point of view nothing has gone wrong at all.
   now, and it has `scripts/readonly_test.sh` behind it in both directions
   because a gate that fires on prose is a gate somebody loosens in a hurry.
   <!-- gd: prio=high size=S labels=tests,project ver=1.3.1 -->
+
+## M11 — What the next restart erases <!-- ms: target=v1.4.0 phase=next -->
+
+M10 was about a divergence with a date in the future. This one is about a
+cluster that is correct right now and will not be after the next `systemctl
+restart` — because what makes it correct was typed at a prompt and never
+written to a file. A `SET GLOBAL` that fixed an incident, a plugin installed by
+hand, a `wsrep_cluster_address` that still lists the node that was
+decommissioned in March. Nothing here is a wrong value, so no check that grades
+values can see it: the finding is the *provenance* of the value, and provenance
+is the one thing the running server knows and nobody writes down.
+
+- [ ] **GD-67 — The setting that only exists in memory**:
+  `performance_schema.variables_info` says where each variable's current value
+  came from — `COMMAND_LINE`, a config file, or `DYNAMIC`, meaning somebody set
+  it at run time. A `DYNAMIC` source on a variable that matters to replication
+  is a fix that dies at the next restart. Available on MySQL and PXC 8.0 and
+  absent on MariaDB, so on MariaDB the check reports *not available* rather
+  than *clean* — a build without the table is not a server without the
+  problem. <!-- gd: prio=high size=M labels=collect,check -->
+- [ ] **GD-68 — `wsrep_cluster_address` against the group**: the list a node
+  reads on start-up, compared with the members it is actually talking to. A
+  node missing from the address list rejoins nothing after a full cluster stop,
+  and an address that resolves to a decommissioned host is a start-up delay
+  nobody expects. The running cluster is the evidence that the list is stale,
+  and the running cluster is what the check has.
+  <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-69 — The provider option one node carries alone**:
+  `wsrep_provider_options` compared across nodes, minus the keys already graded
+  by `flow/settings` and `cluster/segments`. The provider takes some of these at
+  run time and reads all of them at start-up, so a node with `evs.` or `gcs.`
+  tuning its peers do not have is behaving differently now *and* differently
+  again once it comes back. <!-- gd: prio=med size=M labels=check -->
+- [ ] **GD-70 — The plugin nobody put in the config**:
+  `information_schema.PLUGINS` with `LOAD_OPTION`, so a plugin that was
+  `INSTALL PLUGIN`-ed live — `wsrep_info`, an audit plugin, a password
+  validation plugin — is separated from one the config loads. The audit's own
+  `cluster/membership-view` depends on `wsrep_info` being there, which makes
+  this the check that says why a previously working check went quiet.
+  <!-- gd: prio=med size=S labels=collect,check -->
+
+## M12 — The account that exists on one node <!-- ms: target=v1.5.0 phase=next -->
+
+`systables/drift` compares the *definitions* of the `mysql` tables. Their
+**rows** are the other half, and the privilege tables are the half that locks
+people out: `CREATE USER` and `GRANT` replicate, but a statement run with
+`wsrep_on=OFF`, a `mysql_upgrade` on one node, a password rotated by a script
+that connected through the proxy and got whichever node was up — none of them
+do. The cluster stays Primary and Synced, every counter stays flat, and an
+application fails to authenticate on one node in three, which is exactly the
+shape of a bug that gets blamed on the proxy for a week. Reading these tables
+needs a grant the audit may not have, so a node without it is reported as *not
+audited*, never as agreeing.
+
+- [ ] **GD-71 — Accounts, per node**: an order-independent fingerprint of
+  `mysql.user`'s rows — account, host, privileges, plugin, TLS and resource
+  limits, never the credential itself — compared across nodes, with the
+  accounts present here and absent there named individually. The password hash
+  is part of what must match and no part of what is printed.
+  <!-- gd: prio=high size=L labels=collect,check -->
+- [ ] **GD-72 — Grants below the global level**: `mysql.db`, `tables_priv`,
+  `columns_priv` and `procs_priv`, the same way. An account that exists
+  everywhere and can read the schema on two nodes out of three is the version
+  of this that survives a login test.
+  <!-- gd: prio=high size=M labels=collect,check -->
+- [ ] **GD-73 — Authentication that differs**: the plugin, the expiry and the
+  lock state of the same account on different nodes. `unix_socket` on one node
+  and `mysql_native_password` on its peers, or an expired password on the one
+  node a failover has not sent traffic to yet, is a divergence that only shows
+  itself under the load that follows a switch.
+  <!-- gd: prio=med size=M labels=check -->
+- [ ] **GD-74 — The proxy's users against the cluster's**: the accounts in
+  ProxySQL's `mysql_users` must exist, and be usable, on every node the proxy
+  can route to. The monitor user is the one that matters most: the proxy
+  demoting a node it cannot authenticate against looks exactly like a node that
+  is down. Same matching rules as `proxysql/*` already uses, and still no
+  finding about the offline hostgroup.
+  <!-- gd: prio=high size=M labels=proxysql,check -->

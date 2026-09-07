@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**66 items · 63 shipped · 3 open · 10 milestones.**
+**74 items · 63 shipped · 11 open · 12 milestones.**
 
 ## At a glance
 
@@ -22,12 +22,21 @@
 | **M8** — Parked, and why | `v2.0.0` | later | `#####.....` 50% | 2 | 2 |
 | **M9** — Beyond Galera | `v2.0.0` | later | `#####.....` 50% | 1 | 1 |
 | **M10** — Divergence that has not happened yet | `v1.3.0` | shipped | `##########` 100% | 0 | 8 |
+| **M11** — What the next restart erases | `v1.4.0` | next | `..........` 0% | 4 | 0 |
+| **M12** — The account that exists on one node | `v1.5.0` | next | `..........` 0% | 4 | 0 |
 
 ## Next up
 
 The open items with the highest priority in the milestones that are in flight.
 
-_Nothing in flight._
+- **GD-67** — The setting that only exists in memory · `high` · size `M` · collect,check (M11, target `v1.4.0`)
+- **GD-68** — `wsrep_cluster_address` against the group · `high` · size `M` · check (M11, target `v1.4.0`)
+- **GD-71** — Accounts, per node · `high` · size `L` · collect,check (M12, target `v1.5.0`)
+- **GD-72** — Grants below the global level · `high` · size `M` · collect,check (M12, target `v1.5.0`)
+- **GD-74** — The proxy's users against the cluster's · `high` · size `M` · proxysql,check (M12, target `v1.5.0`)
+- **GD-69** — The provider option one node carries alone · `med` · size `M` · check (M11, target `v1.4.0`)
+- **GD-70** — The plugin nobody put in the config · `med` · size `S` · collect,check (M11, target `v1.4.0`)
+- **GD-73** — Authentication that differs · `med` · size `M` · check (M12, target `v1.5.0`)
 
 ## Milestones
 
@@ -167,18 +176,40 @@ Target `v1.3.0` · shipped · 0 open · 8 shipped · `##########` 100%
 | **GD-62** — Cascading foreign keys | med | M | check,collect | shipped `1.3.0` |
 | **GD-65** — A state transfer in flight | low | S | check | shipped `1.3.0` |
 
+### M11 — What the next restart erases
+
+Target `v1.4.0` · next · 4 open · 0 shipped · `..........` 0%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-67** — The setting that only exists in memory | high | M | collect,check | open |
+| **GD-68** — `wsrep_cluster_address` against the group | high | M | check | open |
+| **GD-69** — The provider option one node carries alone | med | M | check | open |
+| **GD-70** — The plugin nobody put in the config | med | S | collect,check | open |
+
+### M12 — The account that exists on one node
+
+Target `v1.5.0` · next · 4 open · 0 shipped · `..........` 0%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-71** — Accounts, per node | high | L | collect,check | open |
+| **GD-72** — Grants below the global level | high | M | collect,check | open |
+| **GD-74** — The proxy's users against the cluster's | high | M | proxysql,check | open |
+| **GD-73** — Authentication that differs | med | M | check | open |
+
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 42 | 2 |
+| `check` | 50 | 10 |
+| `collect` | 10 | 4 |
 | `integration` | 1 | 1 |
+| `proxysql` | 3 | 1 |
 | `cli` | 3 | 0 |
-| `collect` | 6 | 0 |
 | `delivery` | 2 | 0 |
 | `docs` | 5 | 0 |
 | `output` | 4 | 0 |
 | `project` | 4 | 0 |
-| `proxysql` | 2 | 0 |
 | `release` | 5 | 0 |
 | `tests` | 8 | 0 |
