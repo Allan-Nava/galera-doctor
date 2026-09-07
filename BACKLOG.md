@@ -433,3 +433,10 @@ replication's point of view nothing has gone wrong at all.
   the donor's side of it. `node/state` says Donor/Desynced and Joined; this
   says how far along it is and therefore whether waiting is the right thing to
   do. <!-- gd: prio=low size=S labels=check ver=1.3.0 -->
+- [x] **GD-66 — The read-only gate fired on prose**: the CI grep looked for a
+  writing verb anywhere inside a string, so `"ON UPDATE "+onUpdate` and a hint
+  quoting `CREATE TABLE` — both added in v1.3.0 — turned the build red. A
+  statement *begins* with its verb, which is what `scripts/readonly.sh` matches
+  now, and it has `scripts/readonly_test.sh` behind it in both directions
+  because a gate that fires on prose is a gate somebody loosens in a hurry.
+  <!-- gd: prio=high size=S labels=tests,project ver=1.3.1 -->

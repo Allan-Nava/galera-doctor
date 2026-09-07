@@ -6,6 +6,32 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.3.1] - 2026-09-06
+
+### Fixed
+
+- **The read-only gate fired on prose** (GD-66) — CI went red on v1.3.0, and
+  not because anything writes. The grep looked for a writing verb *anywhere*
+  inside a string literal, so two lines added in that release matched it:
+  `"ON UPDATE "+onUpdate`, which renders a cascading constraint for a human,
+  and a `node/charset` hint explaining what a `CREATE TABLE` does without an
+  explicit charset.
+
+  A statement **begins** with its verb, so that is what is matched now: at the
+  start of a string literal, or at the start of a line inside a raw one — which
+  is the shape every query in this repository is written in. The verb list also
+  grew the ones the old pattern never had: `REPLACE`, `RENAME`, `GRANT`,
+  `LOCK TABLES`, `START TRANSACTION`, `KILL`.
+
+  The gate moved out of the workflow YAML into `scripts/readonly.sh` with
+  `scripts/readonly_test.sh` behind it, tested in both directions: an `UPDATE`
+  in a query string, a `DELETE FROM` on its own line inside a raw string,
+  `db.Exec` and `tx.ExecContext`, `SET GLOBAL` and a statement hidden behind
+  escaped whitespace are all caught — and the two lines that broke the build
+  are fixtures for what must **not** be. A false negative would let a write
+  into a tool whose whole promise is that it does not write; a false positive
+  is how that promise gets loosened by somebody in a hurry.
+
 ## [1.3.0] - 2026-09-06
 
 M10, finished: the divergences that have not happened yet. Everything before

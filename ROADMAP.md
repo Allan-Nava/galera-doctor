@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**65 items · 62 shipped · 3 open · 10 milestones.**
+**66 items · 63 shipped · 3 open · 10 milestones.**
 
 ## At a glance
 
@@ -21,7 +21,7 @@
 | **M7** — Every write path, drawn or not | `v1.0.0` | shipped | `##########` 100% | 0 | 7 |
 | **M8** — Parked, and why | `v2.0.0` | later | `#####.....` 50% | 2 | 2 |
 | **M9** — Beyond Galera | `v2.0.0` | later | `#####.....` 50% | 1 | 1 |
-| **M10** — Divergence that has not happened yet | `v1.3.0` | shipped | `##########` 100% | 0 | 7 |
+| **M10** — Divergence that has not happened yet | `v1.3.0` | shipped | `##########` 100% | 0 | 8 |
 
 ## Next up
 
@@ -154,7 +154,7 @@ Target `v2.0.0` · later · 1 open · 1 shipped · `#####.....` 50%
 
 ### M10 — Divergence that has not happened yet
 
-Target `v1.3.0` · shipped · 0 open · 7 shipped · `##########` 100%
+Target `v1.3.0` · shipped · 0 open · 8 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
@@ -162,6 +162,7 @@ Target `v1.3.0` · shipped · 0 open · 7 shipped · `##########` 100%
 | **GD-60** — Character set and collation per node | high | S | check | shipped `1.3.0` |
 | **GD-63** — The transaction that is going to lose | high | M | check,collect | shipped `1.3.0` |
 | **GD-64** — The node the group already distrusts | high | S | check | shipped `1.3.0` |
+| **GD-66** — The read-only gate fired on prose | high | S | tests,project | shipped `1.3.1` |
 | **GD-61** — Time zone, per node | med | S | check | shipped `1.3.0` |
 | **GD-62** — Cascading foreign keys | med | M | check,collect | shipped `1.3.0` |
 | **GD-65** — A state transfer in flight | low | S | check | shipped `1.3.0` |
@@ -177,7 +178,7 @@ Target `v1.3.0` · shipped · 0 open · 7 shipped · `##########` 100%
 | `delivery` | 2 | 0 |
 | `docs` | 5 | 0 |
 | `output` | 4 | 0 |
-| `project` | 3 | 0 |
+| `project` | 4 | 0 |
 | `proxysql` | 2 | 0 |
 | `release` | 5 | 0 |
-| `tests` | 7 | 0 |
+| `tests` | 8 | 0 |

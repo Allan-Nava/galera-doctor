@@ -62,18 +62,12 @@ jobs:
 
       # The promise that this tool cannot change a cluster is mechanical. Every
       # query goes through cluster.Query, which refuses anything but SHOW and
-      # SELECT — and no writing statement may appear in the source at all.
+      # SELECT at run time; this is the other half, and it has its own tests
+      # because a gate that fires on prose gets loosened by somebody in a hurry.
+      - name: The read-only gate itself
+        run: sh scripts/readonly_test.sh
       - name: Still read-only
-        run: |
-          if grep -rniE '"[^"]*\b(INSERT INTO|UPDATE |DELETE FROM|DROP |ALTER |TRUNCATE |CREATE |SET GLOBAL|FLUSH )' \
-               cmd internal --include='*.go' | grep -v '_test.go'; then
-            echo "::error::a writing statement appears in the source: galera-doctor only issues SHOW and SELECT"
-            exit 1
-          fi
-          if grep -rnE '\b(db|tx)\.Exec' cmd internal --include='*.go' | grep -v '_test.go'; then
-            echo "::error::Exec has no business in a read-only auditor"
-            exit 1
-          fi
+        run: ./scripts/readonly.sh
 
   integration:
     runs-on: ubuntu-latest
