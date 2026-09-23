@@ -45,3 +45,26 @@ func TestSortWorstFirstGroupsByCheck(t *testing.T) {
 		t.Fatalf("OK must sort last: got %+v", fs[2])
 	}
 }
+
+// GD-76 — Num is how a check attaches a number to a finding, and Value is a
+// pointer precisely so that "no number" and "zero" are different things.
+func TestNumIsAPointerToTheValueGiven(t *testing.T) {
+	f := Finding{Check: "queue/recv", Value: Num(0), Unit: "writesets"}
+	if f.Value == nil {
+		t.Fatal("Num(0) must not be nil — a queue of zero is a measurement")
+	}
+	if *f.Value != 0 {
+		t.Fatalf("*Value = %v, want 0", *f.Value)
+	}
+	if *Num(12.5) != 12.5 {
+		t.Fatal("Num does not round-trip its argument")
+	}
+	// Each call is its own variable: two findings must not share storage.
+	a, b := Num(1), Num(2)
+	if a == b || *a == *b {
+		t.Fatal("Num returned a shared pointer")
+	}
+	if (Finding{Check: "queue/recv"}).Value != nil {
+		t.Fatal("a finding with no number has a nil Value")
+	}
+}

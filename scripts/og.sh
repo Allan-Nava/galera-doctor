@@ -16,24 +16,35 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 out="${1:-$root/site/og-image.png}"
 
+# CHROME, when set, is the browser and the only one. Falling back to whatever
+# else the machine has would render the card with a different engine than the
+# one that was asked for, and the difference lives in a PNG nobody reviews.
 chrome=""
-for candidate in \
-	"${CHROME:-}" \
-	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-	"/Applications/Chromium.app/Contents/MacOS/Chromium" \
-	"$(command -v google-chrome-stable 2>/dev/null || true)" \
-	"$(command -v google-chrome 2>/dev/null || true)" \
-	"$(command -v chromium 2>/dev/null || true)"; do
-	if [ -n "$candidate" ] && [ -x "$candidate" ]; then
-		chrome="$candidate"
-		break
-	fi
-done
-[ -n "$chrome" ] || {
-	echo "og.sh: no headless Chrome found — set CHROME to one" >&2
-	echo "the checked-in site/og-image.png is only regenerated when the card changes" >&2
-	exit 2
-}
+if [ -n "${CHROME:-}" ]; then
+	[ -x "$CHROME" ] || {
+		echo "og.sh: CHROME is set to \"$CHROME\", which is not an executable" >&2
+		echo "unset CHROME to search the usual places, or point it at a real browser" >&2
+		exit 2
+	}
+	chrome="$CHROME"
+else
+	for candidate in \
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+		"/Applications/Chromium.app/Contents/MacOS/Chromium" \
+		"$(command -v google-chrome-stable 2>/dev/null || true)" \
+		"$(command -v google-chrome 2>/dev/null || true)" \
+		"$(command -v chromium 2>/dev/null || true)"; do
+		if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+			chrome="$candidate"
+			break
+		fi
+	done
+	[ -n "$chrome" ] || {
+		echo "og.sh: no headless Chrome found — set CHROME to one" >&2
+		echo "the checked-in site/og-image.png is only regenerated when the card changes" >&2
+		exit 2
+	}
+fi
 
 # The mark is referenced relatively, so render from assets/.
 "$chrome" --headless --disable-gpu --hide-scrollbars \

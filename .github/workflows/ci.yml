@@ -128,6 +128,13 @@ jobs:
       # canonical or a relative og:image fails no browser and no build.
       - name: The landing page says what it is
         run: sh scripts/seo_test.sh
+      # og.sh renders the preview card and needs a headless Chrome, which this
+      # job does not have and does not need: the test drives a fake one and
+      # checks the arguments that decide the card — above all the 1200x630 that
+      # every generator crops to. The PNG itself is checked in, and its
+      # dimensions are seo_test.sh's assertion.
+      - name: The preview card renderer, against a fake Chrome
+        run: sh scripts/og_test.sh
 
       - name: Every local link resolves
         run: ./scripts/links.sh

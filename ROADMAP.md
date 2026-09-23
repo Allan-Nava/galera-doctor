@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**74 items · 63 shipped · 11 open · 12 milestones.**
+**78 items · 67 shipped · 11 open · 13 milestones.**
 
 ## At a glance
 
@@ -24,6 +24,7 @@
 | **M10** — Divergence that has not happened yet | `v1.3.0` | shipped | `##########` 100% | 0 | 8 |
 | **M11** — What the next restart erases | `v1.4.0` | next | `..........` 0% | 4 | 0 |
 | **M12** — The account that exists on one node | `v1.5.0` | next | `..........` 0% | 4 | 0 |
+| **M13** — The tests that were never red | `v1.3.2` | shipped | `##########` 100% | 0 | 4 |
 
 ## Next up
 
@@ -198,18 +199,29 @@ Target `v1.5.0` · next · 4 open · 0 shipped · `..........` 0%
 | **GD-74** — The proxy's users against the cluster's | high | M | proxysql,check | open |
 | **GD-73** — Authentication that differs | med | M | check | open |
 
+### M13 — The tests that were never red
+
+Target `v1.3.2` · shipped · 0 open · 4 shipped · `##########` 100%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-75** — The `checks` list is a claim, not a gate | high | S | cli,tests | shipped `1.3.2` |
+| **GD-76** — The pure helpers nobody tested | high | M | tests | shipped `1.3.2` |
+| **GD-77** — Nine checks with only the quiet half | high | M | check,tests | shipped `1.3.2` |
+| **GD-78** — The one script without a test | med | S | tests,docs | shipped `1.3.2` |
+
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 50 | 10 |
+| `check` | 51 | 10 |
 | `collect` | 10 | 4 |
 | `integration` | 1 | 1 |
 | `proxysql` | 3 | 1 |
-| `cli` | 3 | 0 |
+| `cli` | 4 | 0 |
 | `delivery` | 2 | 0 |
-| `docs` | 5 | 0 |
+| `docs` | 6 | 0 |
 | `output` | 4 | 0 |
 | `project` | 4 | 0 |
 | `release` | 5 | 0 |
-| `tests` | 8 | 0 |
+| `tests` | 12 | 0 |

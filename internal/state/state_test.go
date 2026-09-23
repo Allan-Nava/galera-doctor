@@ -221,3 +221,59 @@ func TestScopingNilIsNil(t *testing.T) {
 		t.Fatal("no state file scopes to no state")
 	}
 }
+
+// GD-76 — Delta's arithmetic, and the key findings are remembered under.
+//
+// PerSecond and Key were both at 0%: exercised in production on every run with
+// --state, and by nothing in this package. The zero-interval guard is the one
+// that matters — two runs in the same second is not a rate of infinity.
+
+func TestPerSecondIsZeroForAZeroLengthInterval(t *testing.T) {
+	// Two runs inside the same instant. Dividing by that is +Inf, which then
+	// renders as a number nobody can grade and compares greater than every
+	// threshold.
+	if got := (Delta{Value: 500, Elapsed: 0}).PerSecond(); got != 0 {
+		t.Errorf("a zero interval has no rate, got %v", got)
+	}
+	if got := (Delta{Value: 500, Elapsed: -time.Second}).PerSecond(); got != 0 {
+		t.Errorf("a negative interval has no rate, got %v", got)
+	}
+}
+
+func TestPerSecondDividesByTheInterval(t *testing.T) {
+	if got := (Delta{Value: 120, Elapsed: 60 * time.Second}).PerSecond(); got != 2 {
+		t.Errorf("PerSecond = %v, want 2", got)
+	}
+	if got := (Delta{Value: 0, Elapsed: 60 * time.Second}).PerSecond(); got != 0 {
+		t.Errorf("a counter that did not move has a rate of zero, got %v", got)
+	}
+}
+
+func TestFractionIsTheShareOfTheIntervalTheCounterAccountsFor(t *testing.T) {
+	// The shape wsrep_flow_control_paused_ns is in: nanoseconds paused over
+	// nanoseconds elapsed. Half a minute of pausing in a minute is 0.5, and
+	// that is the only honest way to report flow control between two runs.
+	d := Delta{Value: float64(30 * time.Second), Elapsed: 60 * time.Second}
+	if got := d.Fraction(); got != 0.5 {
+		t.Errorf("Fraction = %v, want 0.5", got)
+	}
+	if got := (Delta{Value: 1, Elapsed: 0}).Fraction(); got != 0 {
+		t.Errorf("a zero interval has no fraction, got %v", got)
+	}
+}
+
+func TestKeyIsTheCheckAndItsTargetAndNotTheMessage(t *testing.T) {
+	// The message carries a measurement, so keying on it would report a
+	// changed finding every time a percentage moved by 0.1.
+	if got := Key("flow/paused", "cl-01"); got != "flow/paused@cl-01" {
+		t.Fatalf("Key = %q", got)
+	}
+	// Two checks about the same node, and one check about two nodes, must not
+	// collide.
+	if Key("flow/paused", "cl-01") == Key("queue/recv", "cl-01") {
+		t.Fatal("different checks on one node share a key")
+	}
+	if Key("flow/paused", "cl-01") == Key("flow/paused", "cl-02") {
+		t.Fatal("one check on different nodes shares a key")
+	}
+}

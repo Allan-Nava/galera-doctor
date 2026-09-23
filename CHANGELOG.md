@@ -6,6 +6,71 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.3.2] - 2026-09-23
+
+M13: the tests that were never red. An audit of the suite found four places
+where a gate existed and could not fail, and one of them had already let a
+defect through — which is the argument for the whole milestone. Nothing about
+what the tool checks changed; what changed is that the claims it makes about
+itself are now verified.
+
+### Fixed
+
+- **`galera-doctor checks` described output it had drifted away from**
+  (GD-75) — the list is fifty-odd check ids typed by hand, and nothing
+  compared it to the ids the audit actually emits. Three were missing:
+  `cluster/membership`, `cluster/provider-version` and `node/not-galera` all
+  fire in the field, and an operator grepping the documented checks for the
+  line in their report found nothing. Five more hid behind a `proxysql/*`
+  wildcard that stood in for real ids rather than naming them.
+
+  All eight are listed now, and `cmd/galera-doctor/checks_test.go` walks the
+  two sets in both directions so the next check cannot ship undocumented, nor
+  a removed one stay in the list. The comparison is made against the source
+  with `go/ast` rather than by running an audit: no fixture triggers seventy
+  checks at once, and one that did would be a second hand-written list with
+  the same failure mode.
+
+- **`CHROME` was a suggestion** (GD-78) — `scripts/og.sh` treated it as the
+  first entry in a search list, so pointing it at a binary that is not there
+  silently rendered the preview card with whatever browser the machine
+  happened to have. A card rendered by a different engine than the one that
+  was asked for is a difference that lives in a PNG nobody reviews. `CHROME`,
+  when set, is now the browser and the only one; unset, the search is
+  unchanged.
+
+### Added
+
+- **`scripts/og_test.sh`** (GD-78) — og.sh was the one script in `scripts/`
+  without a test, and the worst candidate for the gap: it regenerates a binary
+  file, and the thing that would go wrong — the wrong window size, so every
+  site that renders the card crops or letterboxes it — is invisible until
+  somebody shares a link. Fifteen checks against a fake Chrome on `CHROME`,
+  covering the arguments that decide the card, the Chrome that exits 0 having
+  written nothing, and a cross-assertion that the 1200x630 og.sh renders is
+  the 1200x630 `seo_test.sh` asserts. Wired into CI in the same commit.
+
+- **Tests for the nine checks that had only their quiet half** (GD-77) —
+  `cluster/conf-id`, `cluster/provider-version`, `node/connected`,
+  `node/desync`, `node/read-only`, `node/timezone`, `queue/recv`, `queue/send`
+  and `repl/cert-failures` were each walked by the healthy fixture and by
+  nothing that made them fire. A check whose red path never runs in the suite
+  ships untried, and the failure it produces — wrong node named, wrong
+  severity — is the one nobody can reproduce. Each now has the condition
+  planted on one node and the finding asserted by id, target and status, plus
+  the `node/state` severity mapping in full. Two of the new assertions were
+  themselves found vacuous by mutating the checks they cover, and fixed.
+
+- **Tests for the pure helpers that only a live server reached** (GD-76) —
+  `cluster.HostOnly` is the documented ProxySQL matching trap and had none;
+  `collect.parseWhen` guesses between five timestamp layouts and a fractional
+  epoch for `backup/freshness` and was reachable only behind `GD_TEST_DSN`.
+  With `ReplLatency`, `Segment`, `ColumnRow`, `Names`, `OK`,
+  `ReplicaLink.Running`, `placeholders`, `errString`, `state.Key`,
+  `Delta.PerSecond`, `Delta.Fraction` and `finding.Num`, all of them were at
+  0%. `redact` grew the two cases a driver actually produces beyond the one it
+  had. Coverage 70.5% to 73.2%, which is the smaller half of the point.
+
 ## [1.3.1] - 2026-09-06
 
 ### Fixed

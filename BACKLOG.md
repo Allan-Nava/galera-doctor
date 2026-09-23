@@ -518,3 +518,46 @@ audited*, never as agreeing.
   is down. Same matching rules as `proxysql/*` already uses, and still no
   finding about the offline hostgroup.
   <!-- gd: prio=high size=M labels=proxysql,check -->
+
+## M13 — The tests that were never red <!-- ms: target=v1.3.2 phase=shipped -->
+
+Every gate this repository has is green, which is the problem: the audit that
+found these items ran the whole suite and learned nothing, because the missing
+tests are missing rather than failing. The shape repeats — a check whose
+healthy fixture walks the code and never plants the condition, a pure function
+that only the integration test reaches, a hand-written list with no diff
+against what it describes. High statement coverage hid all three, and one of
+them had already drifted.
+
+- [x] **GD-75 — The `checks` list is a claim, not a gate**: `cmdChecks` is
+  fifty-odd check ids typed by hand, 0% covered, with nothing comparing it to
+  the ids `audit.Run` and `proxysql.Audit` actually emit — and it has already
+  drifted: `cluster/membership`, `cluster/provider-version` and
+  `node/not-galera` fire and are not listed. A test that walks the two sets in
+  both directions, the way `backlog.sh labels` does for the label vocabulary,
+  so the next check cannot ship undocumented.
+  <!-- gd: prio=high size=S labels=cli,tests ver=1.3.2 -->
+- [x] **GD-76 — The pure helpers nobody tested**: `cluster.HostOnly` is the
+  documented ProxySQL matching trap — port and CIDR suffix — and has no direct
+  test; `collect.parseWhen` guesses between five layouts and a fractional epoch
+  for `backup/freshness` and is reachable only behind `GD_TEST_DSN`;
+  `state.Delta.PerSecond`, `state.Key`, `cluster.ReplLatency`, `Segment`,
+  `ColumnRow`, `Names`, `collect.placeholders`, `keyValue`, `errString` and
+  `finding.Num` are all 0%. None of them needs a server. `redact` has exactly
+  one case for a rule that says a DSN never reaches the output, which is one
+  fewer than that rule deserves. <!-- gd: prio=high size=M labels=tests ver=1.3.2 -->
+- [x] **GD-77 — Nine checks with only the quiet half**: the "two tests minimum"
+  rule is satisfied halfway for `cluster/conf-id`, `cluster/provider-version`,
+  `node/connected`, `node/desync`, `node/read-only`, `node/timezone`,
+  `queue/recv`, `queue/send` and `repl/cert-failures` — the healthy fixture
+  proves they stay silent, and nothing proves they fire, or that they name the
+  right node when they do. `nodeState` at 75% and `stateComment` at 67% are
+  where that shows. One planted condition each, asserted by check id and by
+  target. <!-- gd: prio=high size=M labels=check,tests ver=1.3.2 -->
+- [x] **GD-78 — The one script without a test**: `scripts/og.sh` is the only
+  `scripts/x.sh` with no `scripts/x_test.sh` and no CI step, so the rule that
+  covers the tooling has a hole in exactly the place where a regenerated PNG is
+  hardest to eyeball. It needs headless Chrome, which the test does not: a fake
+  `chrome` on `PATH` and an `ASSETS_DIR` override cover the argument handling
+  and the 1200x630 assertion, the way the `gh` fake covers `backlog.sh issues`.
+  <!-- gd: prio=med size=S labels=tests,docs ver=1.3.2 -->
