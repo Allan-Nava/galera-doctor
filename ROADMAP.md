@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**78 items · 67 shipped · 11 open · 13 milestones.**
+**84 items · 67 shipped · 17 open · 14 milestones.**
 
 ## At a glance
 
@@ -25,6 +25,7 @@
 | **M11** — What the next restart erases | `v1.4.0` | next | `..........` 0% | 4 | 0 |
 | **M12** — The account that exists on one node | `v1.5.0` | next | `..........` 0% | 4 | 0 |
 | **M13** — The tests that were never red | `v1.3.2` | shipped | `##########` 100% | 0 | 4 |
+| **M14** — The seqno nobody compares | `v1.6.0` | next | `..........` 0% | 6 | 0 |
 
 ## Next up
 
@@ -35,9 +36,9 @@ The open items with the highest priority in the milestones that are in flight.
 - **GD-71** — Accounts, per node · `high` · size `L` · collect,check (M12, target `v1.5.0`)
 - **GD-72** — Grants below the global level · `high` · size `M` · collect,check (M12, target `v1.5.0`)
 - **GD-74** — The proxy's users against the cluster's · `high` · size `M` · proxysql,check (M12, target `v1.5.0`)
-- **GD-69** — The provider option one node carries alone · `med` · size `M` · check (M11, target `v1.4.0`)
-- **GD-70** — The plugin nobody put in the config · `med` · size `S` · collect,check (M11, target `v1.4.0`)
-- **GD-73** — Authentication that differs · `med` · size `M` · check (M12, target `v1.5.0`)
+- **GD-79** — Apply lag, in transactions rather than in queue depth · `high` · size `M` · check (M14, target `v1.6.0`)
+- **GD-80** — IST or SST, as a fact instead of a forecast · `high` · size `M` · check (M14, target `v1.6.0`)
+- **GD-81** — The transactions the cluster killed · `high` · size `M` · check (M14, target `v1.6.0`)
 
 ## Milestones
 
@@ -210,11 +211,24 @@ Target `v1.3.2` · shipped · 0 open · 4 shipped · `##########` 100%
 | **GD-77** — Nine checks with only the quiet half | high | M | check,tests | shipped `1.3.2` |
 | **GD-78** — The one script without a test | med | S | tests,docs | shipped `1.3.2` |
 
+### M14 — The seqno nobody compares
+
+Target `v1.6.0` · next · 6 open · 0 shipped · `..........` 0%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-79** — Apply lag, in transactions rather than in queue depth | high | M | check | open |
+| **GD-80** — IST or SST, as a fact instead of a forecast | high | M | check | open |
+| **GD-81** — The transactions the cluster killed | high | M | check | open |
+| **GD-82** — Applier threads that are not applying in parallel | med | S | check | open |
+| **GD-83** — The ceiling GD-82 is measured against | med | S | check | open |
+| **GD-84** — The certification index that grew | med | S | check | open |
+
 ## By label
 
 | Label | Items | Open |
 |---|---|---|
-| `check` | 51 | 10 |
+| `check` | 57 | 16 |
 | `collect` | 10 | 4 |
 | `integration` | 1 | 1 |
 | `proxysql` | 3 | 1 |

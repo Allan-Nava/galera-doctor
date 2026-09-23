@@ -561,3 +561,71 @@ them had already drifted.
   `chrome` on `PATH` and an `ASSETS_DIR` override cover the argument handling
   and the 1200x630 assertion, the way the `gh` fake covers `backlog.sh issues`.
   <!-- gd: prio=med size=S labels=tests,docs ver=1.3.2 -->
+
+## M14 — The seqno nobody compares <!-- ms: target=v1.6.0 phase=next -->
+
+Every node reports where it is in the replication stream, how far back its
+cache still reaches, how much of the workload it manages to apply at once, and
+how many local transactions it killed to let a remote one in. Alone each of
+these is a number with no scale — nobody knows whether a certification index of
+90,000 is large, and no dashboard has a threshold for it. Compared against the
+other nodes, or against the same node ten minutes ago, each one answers a
+question an operator actually asks: how far behind is that node really, can it
+rejoin without a full copy, and why is the application seeing deadlocks nobody
+can reproduce.
+
+`SHOW GLOBAL STATUS` is already read whole, so every variable here is in the
+snapshot and unused; `wsrep_local_bf_aborts` is already carried between runs by
+`state.Counters` with nothing grading it. This milestone is mostly arithmetic
+over data the tool already has.
+
+- [ ] **GD-79 — Apply lag, in transactions rather than in queue depth**:
+  `wsrep_last_committed` compared across nodes. `queue/recv` answers "how much
+  is waiting here", which is empty on a node that is behind because it stopped
+  *receiving* — the two failures look opposite and read the same from one node.
+  The nodes are collected concurrently, so a small spread is collection skew
+  and not lag: grade only what is larger than that, and where `--state` gives a
+  write rate, say the spread in seconds as well as in seqnos, because "40,000
+  behind" means nothing without the rate that produced it.
+  <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-80 — IST or SST, as a fact instead of a forecast**:
+  `wsrep_local_cached_downto` is the oldest seqno a node still holds. Against
+  each other node's `wsrep_last_committed` it answers the question
+  `gcache/window` can only estimate: if this node restarts now, which of its
+  peers can still feed it an incremental transfer, and which would have to copy
+  the whole dataset. A cluster where no node can donate an IST to any other is
+  one restart away from an hour of `sst/size`, and today that is invisible
+  until it happens. Absent on a build that does not report the variable, which
+  is *not available* rather than clean. <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-81 — The transactions the cluster killed** (`repl/bf-aborts`):
+  `wsrep_local_bf_aborts` graded over the interval, with `wsrep_local_replays`
+  beside it. A brute-force abort is a local transaction rolled back so a
+  writeset from another node could commit: the application sees a deadlock
+  error at a point in its code where no deadlock is possible, and nobody
+  attributes it to replication. Distinct from `repl/cert-failures`, which is
+  this node's own writesets losing certification elsewhere — same cause,
+  opposite direction, different fix. The baseline is already recorded;
+  `wsrep_local_replays` has to join `state.Counters`, and both need the
+  ungraded fallback when there is none. <!-- gd: prio=high size=M labels=check -->
+- [ ] **GD-82 — Applier threads that are not applying in parallel**:
+  `wsrep_apply_window` is how many writesets the node actually had in flight at
+  once, on average. Against `wsrep_slave_threads` it says whether the
+  parallelism that was configured is the parallelism that happened — a node
+  with sixteen threads and a window of 1.2 is applying serially, and the queue
+  that `repl/appliers` reports will not be fixed by adding more.
+  <!-- gd: prio=med size=S labels=check -->
+- [ ] **GD-83 — The ceiling GD-82 is measured against**:
+  `wsrep_cert_deps_distance` is the average gap between writesets that depend
+  on each other, and therefore the hard upper bound on useful applier threads.
+  Threads above it do nothing; threads far below it leave the workload's own
+  parallelism unused. GD-82 says what is happening and this says what was ever
+  possible, so the pair produces a number to set rather than a direction to
+  move in. <!-- gd: prio=med size=S labels=check -->
+- [ ] **GD-84 — The certification index that grew**: `wsrep_cert_index_size`
+  is memory outside the buffer pool, and it grows with the certification
+  interval — a long transaction, or an applier that fell behind, keeps a longer
+  history certifiable. There is no absolute threshold worth shipping, so this
+  is graded the way drift is: against the node's peers. One node an order of
+  magnitude above the others is certifying against a history the others have
+  already discarded, which is the cause of `txn/long-running` seen from the
+  other end. <!-- gd: prio=med size=S labels=check -->
