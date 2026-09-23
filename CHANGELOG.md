@@ -6,6 +6,42 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.3.3] - 2026-09-23
+
+### Added
+
+- **A coverage floor per package, and a gate that enforces it** (GD-85) — CI
+  had printed the total coverage on every run since the first release and
+  compared it with nothing. A number that is printed and not asserted is
+  decoration: the figure the M13 audit found at 70.5% had been falling for
+  releases with no build going red, and nothing would have stopped it falling
+  further.
+
+  The floor is per package rather than one global figure, because one global
+  figure is the wrong shape for this repository. `internal/cluster` sits at
+  23.7% *on purpose* — its SQL belongs to the integration test behind
+  `GD_TEST_DSN` and cannot be unit-tested honestly — while `internal/audit` at
+  96.6% is where a drop means a check shipped untested. Averaged together, the
+  second can rot while the first holds the number up.
+
+  `scripts/coverage.sh` carries the eight floors, each a couple of points under
+  today's measurement: close enough to catch a real fall, far enough not to
+  flap on a refactor that moves ten statements. It also refuses the two ways a
+  gate like this quietly stops covering anything — a package with no floor
+  declared, and a floor for a package that no longer exists — and refuses to
+  read a `FAIL` line or a package with no test files as a percentage, because
+  reporting a broken build as a healthy one is worse than having no gate. A
+  floor left ten points behind the real number produces a note rather than a
+  failure: raising one is a decision with a commit behind it.
+
+  `scripts/coverage_test.sh` drives all seventeen of those cases off a fixture,
+  never off this repository's own numbers, plus one check that runs the real
+  floors against a real `go test` so a table naming renamed packages cannot
+  pass. Writing it earned its keep immediately: the first version of the script
+  piped `awk` into `sort`, which replaced the exit status of the one with the
+  exit status of the other, and every failure reported success. Three fixture
+  cases caught it.
+
 ## [1.3.2] - 2026-09-23
 
 M13: the tests that were never red. An audit of the suite found four places

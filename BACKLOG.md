@@ -629,3 +629,27 @@ over data the tool already has.
   magnitude above the others is certifying against a history the others have
   already discarded, which is the cause of `txn/long-running` seen from the
   other end. <!-- gd: prio=med size=S labels=check -->
+
+## M15 — The number nobody was watching <!-- ms: target=v1.3.3 phase=shipped -->
+
+M13 closed four gates that could not fail. This is the fifth, found while
+writing them: CI has printed the total coverage on every run since the first
+release and compared it with nothing. A figure that is printed and not
+asserted is decoration — the 70.5% that the M13 audit found had been falling
+for releases without anybody noticing, and nothing would have failed if it had
+gone on falling.
+
+- [x] **GD-85 — A coverage floor per package, not one global number**: a
+  single threshold is the wrong shape here. `internal/cluster` is at 23.7%
+  *on purpose* — its SQL is the integration test's job, behind `GD_TEST_DSN` —
+  while `internal/audit` at 96.6% is where a drop actually means a check went
+  untested, and one global figure lets the second rot while the first holds it
+  up. `scripts/coverage.sh` carries a floor per package and fails the build
+  under it, with `scripts/coverage_test.sh` behind it driving the script off a
+  fixture instead of this repository's own numbers. A package with no floor
+  declared is a failure and so is a floor for a package that no longer exists,
+  because the way this gate would quietly stop covering things is a new
+  package nobody added a line for. Floors sit a couple of points under today's
+  measurement — close enough to bite, far enough not to flap — and the script
+  says when one has been left far behind the real number.
+  <!-- gd: prio=high size=M labels=tests,project ver=1.3.3 -->

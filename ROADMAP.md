@@ -6,7 +6,7 @@
 > of truth for planned work. Regenerate it with `scripts/backlog.sh roadmap`
 > after editing the backlog — CI fails when the two disagree.
 
-**84 items · 67 shipped · 17 open · 14 milestones.**
+**85 items · 68 shipped · 17 open · 15 milestones.**
 
 ## At a glance
 
@@ -26,6 +26,7 @@
 | **M12** — The account that exists on one node | `v1.5.0` | next | `..........` 0% | 4 | 0 |
 | **M13** — The tests that were never red | `v1.3.2` | shipped | `##########` 100% | 0 | 4 |
 | **M14** — The seqno nobody compares | `v1.6.0` | next | `..........` 0% | 6 | 0 |
+| **M15** — The number nobody was watching | `v1.3.3` | shipped | `##########` 100% | 0 | 1 |
 
 ## Next up
 
@@ -224,6 +225,14 @@ Target `v1.6.0` · next · 6 open · 0 shipped · `..........` 0%
 | **GD-83** — The ceiling GD-82 is measured against | med | S | check | open |
 | **GD-84** — The certification index that grew | med | S | check | open |
 
+### M15 — The number nobody was watching
+
+Target `v1.3.3` · shipped · 0 open · 1 shipped · `##########` 100%
+
+| Item | Priority | Size | Labels | Status |
+|---|---|---|---|---|
+| **GD-85** — A coverage floor per package, not one global number | high | M | tests,project | shipped `1.3.3` |
+
 ## By label
 
 | Label | Items | Open |
@@ -236,6 +245,6 @@ Target `v1.6.0` · next · 6 open · 0 shipped · `..........` 0%
 | `delivery` | 2 | 0 |
 | `docs` | 6 | 0 |
 | `output` | 4 | 0 |
-| `project` | 4 | 0 |
+| `project` | 5 | 0 |
 | `release` | 5 | 0 |
-| `tests` | 12 | 0 |
+| `tests` | 13 | 0 |

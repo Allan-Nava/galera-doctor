@@ -34,6 +34,17 @@ jobs:
           go test -coverprofile=cover.out ./...
           go tool cover -func=cover.out | tail -1
 
+      # Until GD-85 the step above printed that total and compared it with
+      # nothing, so coverage fell over several releases and no build went red.
+      # The floor is per package: internal/cluster sits low because its SQL
+      # belongs to the integration job below, and one global number would let
+      # internal/audit rot while that average held it up. The gate has its own
+      # test because a gate that cannot fail is the thing it exists to prevent.
+      - name: The coverage gate itself
+        run: sh scripts/coverage_test.sh
+      - name: Every package meets its coverage floor
+        run: ./scripts/coverage.sh
+
       # Nodes are collected concurrently and folded back into one slice.
       - name: Test with the race detector
         run: go test -race ./...
