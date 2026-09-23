@@ -26,7 +26,7 @@
 | **M12** — The account that exists on one node | `v1.5.0` | next | `..........` 0% | 4 | 0 |
 | **M13** — The tests that were never red | `v1.3.2` | shipped | `##########` 100% | 0 | 4 |
 | **M14** — The seqno nobody compares | `v1.6.0` | next | `..........` 0% | 6 | 0 |
-| **M15** — The number nobody was watching | `v1.3.3` | shipped | `##########` 100% | 0 | 1 |
+| **M15** — The number nobody was watching | `v1.3.4` | shipped | `##########` 100% | 0 | 1 |
 
 ## Next up
 
@@ -227,11 +227,11 @@ Target `v1.6.0` · next · 6 open · 0 shipped · `..........` 0%
 
 ### M15 — The number nobody was watching
 
-Target `v1.3.3` · shipped · 0 open · 1 shipped · `##########` 100%
+Target `v1.3.4` · shipped · 0 open · 1 shipped · `##########` 100%
 
 | Item | Priority | Size | Labels | Status |
 |---|---|---|---|---|
-| **GD-85** — A coverage floor per package, not one global number | high | M | tests,project | shipped `1.3.3` |
+| **GD-85** — A coverage floor per package, not one global number | high | M | tests,project | shipped `1.3.4` |
 
 ## By label
 

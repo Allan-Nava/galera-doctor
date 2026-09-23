@@ -171,6 +171,55 @@ else
 	pass "and produces no note: it is doing its job"
 fi
 
+# --- every awk on this machine ------------------------------------------------
+#
+# The gate shipped once having passed here and died on the runner: `next` in a
+# BEGIN action is undefined in POSIX, tolerated by the awk on macOS and a hard
+# error in gawk. A whole suite of green checks proved nothing about the only
+# interpreter that was going to run it.
+#
+# So the checks above run again under every awk this machine has. On a laptop
+# with one that is one extra pass; on CI, and on anybody with gawk or mawk
+# installed, it is the difference between catching that class of bug here and
+# catching it after a push.
+
+# AWK names one command, not a command line, so the candidates are binaries.
+# busybox awk needs no entry of its own: on a system where it is the awk, it
+# is what the first candidate runs.
+for bin in awk gawk mawk original-awk; do
+	command -v "$bin" >/dev/null 2>&1 || continue
+
+	floors "example/a 90.0"
+	cover "$(ok_line example/a 96.6)"
+	checks=$((checks + 1))
+	if COVER_OUTPUT="$tmp/cover" FLOORS_FILE="$tmp/floors" AWK="$bin" \
+		sh "$script" >"$tmp/out.txt" 2>&1; then
+		echo "ok   it accepts a passing tree under $bin"
+	else
+		failures=$((failures + 1))
+		echo "FAIL: $candidate rejected a tree it should accept" >&2
+		sed 's/^/       /' "$tmp/out.txt" >&2
+	fi
+
+	# The half that matters: an interpreter that errors out early exits
+	# non-zero too, so only asserting the failure would call a broken script
+	# a working gate.
+	floors "example/a 99.0"
+	cover "$(ok_line example/a 96.6)"
+	checks=$((checks + 1))
+	if COVER_OUTPUT="$tmp/cover" FLOORS_FILE="$tmp/floors" AWK="$bin" \
+		sh "$script" >"$tmp/out.txt" 2>&1; then
+		failures=$((failures + 1))
+		echo "FAIL: $candidate passed a package below its floor" >&2
+	elif grep -q 'below its floor' "$tmp/out.txt"; then
+		echo "ok   it fails a low package under $bin, for the right reason"
+	else
+		failures=$((failures + 1))
+		echo "FAIL: $candidate failed without grading anything — the program did not run" >&2
+		sed 's/^/       /' "$tmp/out.txt" >&2
+	fi
+done
+
 # --- the real floors, against the real packages -------------------------------
 #
 # The one fixture that cannot go stale. Every other test here proves the gate
@@ -179,7 +228,12 @@ fi
 # nothing.
 
 checks=$((checks + 1))
-if FLOORS_FILE="" COVER_OUTPUT="" sh "$script" >"$tmp/real.txt" 2>&1; then
+if ! command -v go >/dev/null 2>&1; then
+	# Said out loud rather than skipped in silence: this is the one check here
+	# that touches the real packages, and a run without it has not verified
+	# that the floor table still names them.
+	echo "ok   the checked-in floors (skipped: no go toolchain on this machine)"
+elif FLOORS_FILE="" COVER_OUTPUT="" sh "$script" >"$tmp/real.txt" 2>&1; then
 	echo "ok   the checked-in floors hold against a real go test run"
 else
 	failures=$((failures + 1))

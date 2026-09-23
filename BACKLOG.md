@@ -630,7 +630,7 @@ over data the tool already has.
   already discarded, which is the cause of `txn/long-running` seen from the
   other end. <!-- gd: prio=med size=S labels=check -->
 
-## M15 — The number nobody was watching <!-- ms: target=v1.3.3 phase=shipped -->
+## M15 — The number nobody was watching <!-- ms: target=v1.3.4 phase=shipped -->
 
 M13 closed four gates that could not fail. This is the fifth, found while
 writing them: CI has printed the total coverage on every run since the first
@@ -651,5 +651,9 @@ gone on falling.
   because the way this gate would quietly stop covering things is a new
   package nobody added a line for. Floors sit a couple of points under today's
   measurement — close enough to bite, far enough not to flap — and the script
-  says when one has been left far behind the real number.
-  <!-- gd: prio=high size=M labels=tests,project ver=1.3.3 -->
+  says when one has been left far behind the real number. Shipped in 1.3.3 and
+  fixed in 1.3.4: the first version used `next` in an awk `BEGIN` action,
+  which the awk on macOS accepts and the gawk in CI refuses, so the gate
+  passed locally and died on the runner. `AWK` now selects the implementation
+  and the test runs under every one on the machine.
+  <!-- gd: prio=high size=M labels=tests,project ver=1.3.4 -->

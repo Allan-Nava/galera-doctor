@@ -18,6 +18,11 @@
 #
 # COVER_OUTPUT and FLOORS_FILE override the two inputs, which is how
 # scripts/coverage_test.sh drives it off a fixture instead of this repository.
+# AWK picks the implementation: the parsing below has to hold under the awk on
+# a maintainer's Mac and the gawk in CI alike, and it did not — the first
+# version used `next` in a BEGIN action, which one accepts and the other
+# rejects outright, so the gate passed locally and died on the runner. The
+# override is what lets the test say so before a push does.
 #
 # POSIX sh only.
 
@@ -61,12 +66,15 @@ fi
 
 # One pass in awk: it has the float comparison, and shelling out to a
 # comparison per package would make this the slowest gate in CI for no reason.
-awk -v floors="$tmp/floors" '
+"${AWK:-awk}" -v floors="$tmp/floors" '
 BEGIN {
 	while ((getline line < floors) > 0) {
 		if (line ~ /^[ \t]*($|#)/) continue
 		n = split(line, f, /[ \t]+/)
-		if (n < 2) { printf "coverage.sh: unreadable floor: %s\n", line > "/dev/stderr"; bad = 1; next }
+		# continue, not next: next in a BEGIN action is undefined in POSIX,
+		# tolerated by the awk on macOS and a hard error in gawk, which is
+		# what CI runs. The whole gate died on it there while passing here.
+		if (n < 2) { printf "coverage.sh: unreadable floor: %s\n", line > "/dev/stderr"; bad = 1; continue }
 		floor[f[1]] = f[2] + 0
 		declared[f[1]] = 1
 	}

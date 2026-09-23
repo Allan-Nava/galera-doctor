@@ -6,6 +6,28 @@ All notable changes to galera-doctor are recorded here. The format is
 with its own section; `minor` for new checks or flags, `patch` for fixes. Items
 reference their `GD-n` id in [BACKLOG.md](BACKLOG.md).
 
+## [1.3.4] - 2026-09-23
+
+### Fixed
+
+- **The coverage gate died on the runner it shipped for** (GD-85) — v1.3.3
+  passed every check on a maintainer's Mac and failed CI on the first push.
+  `scripts/coverage.sh` used `next` inside an `awk` `BEGIN` action, which is
+  undefined in POSIX: the awk on macOS accepts it, the gawk on the runner
+  rejects the program outright. Nineteen green checks locally proved nothing
+  about the only interpreter that was going to run it.
+
+  `continue` is the correct construct — the statement sits inside a `while` —
+  and `AWK` now selects the implementation, so `scripts/coverage_test.sh` runs
+  its pass and fail cases again under every awk on the machine rather than
+  only the default one. Verified under gawk 5.3, mawk 1.3.4 and busybox awk;
+  the fail case asserts the reason as well as the exit status, because an
+  interpreter that refuses to parse the program also exits non-zero and would
+  otherwise read as a working gate.
+
+  The one check that needs a Go toolchain now says it was skipped when there
+  is none, rather than being silently absent from the count.
+
 ## [1.3.3] - 2026-09-23
 
 ### Added
